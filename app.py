@@ -11,7 +11,28 @@ import plotly.express as px
 
 st.set_page_config(page_title="Churn CloudMetrics", layout="wide")
 
-DATA_PATH = "tabla_unificada_churn.csv"  # renombrar el CSV a esto en el repo
+import glob
+import os
+
+
+def encontrar_csv():
+    """Busca el CSV unificado sin depender del nombre exacto."""
+    candidatos = [
+        "tabla_unificada_churn.csv",
+        "data/tabla_unificada_churn.csv",
+    ]
+    for c in candidatos:
+        if os.path.exists(c):
+            return c
+    # buscar cualquier csv con 'unificada' en el nombre, en raiz o subcarpetas
+    matches = glob.glob("**/*unificada*.csv", recursive=True)
+    if matches:
+        return matches[0]
+    # ultimo recurso: el primer csv que aparezca en el repo
+    matches = glob.glob("**/*.csv", recursive=True)
+    if matches:
+        return matches[0]
+    return None
 
 
 # ------------------------------------------------------------------
@@ -56,6 +77,15 @@ def cargar_datos(path):
 
     return df
 
+
+DATA_PATH = encontrar_csv()
+if DATA_PATH is None:
+    st.error(
+        "No se encontro ningun CSV en el repositorio. "
+        "Subi el archivo a la raiz del repo (idealmente como "
+        "tabla_unificada_churn.csv) y volve a desplegar."
+    )
+    st.stop()
 
 df = cargar_datos(DATA_PATH)
 
