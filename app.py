@@ -1,9 +1,3 @@
-"""
-Dashboard de Churn CloudMetrics
-Fuentes: usuarios + retiros + uso de producto + soporte (chat, whatsapp, telefono).
-Sistema de control continuo para el equipo de Customer Experience.
-"""
-
 import os
 import glob
 import pandas as pd
@@ -13,8 +7,6 @@ import plotly.express as px
 
 st.set_page_config(page_title="Churn CloudMetrics", layout="wide", page_icon="📊")
 
-# Paleta inspirada en la identidad de Alegra (turquesa de marca).
-# Si conseguis el hex oficial, cambialo solo aca y se propaga a todo el dashboard.
 TEAL = "#00B8A9"        # color de marca, positivo, cuentas activas
 TEAL_OSCURO = "#0A8C82"
 NAVY = "#16284B"        # texto y titulos
@@ -49,7 +41,7 @@ div[data-testid="stMetric"] > div {{justify-content: center; align-items: center
 def logo_cloudmetrics():
     # Logo inventado: nube + barras de metrica, en turquesa de marca. Compacto (sin saltos de linea).
     return (
-        f'<svg width="54" height="54" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        f'<svg width="70" height="70" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
         f'<path d="M20 42h24a11 11 0 0 0 1.5-21.9A15 15 0 0 0 17 24.5 10 10 0 0 0 20 42z" fill="{TEAL}" opacity="0.18"/>'
         f'<path d="M22 40h22a9 9 0 0 0 1-17.9A13 13 0 0 0 19 26 8 8 0 0 0 22 40z" fill="none" stroke="{TEAL}" stroke-width="2.4"/>'
         f'<rect x="25" y="31" width="3.4" height="7" rx="1.2" fill="{TEAL_OSCURO}"/>'
@@ -219,10 +211,9 @@ st.sidebar.caption(f"Mostrando {len(d):,} de {len(df):,} cuentas")
 
 
 # ---------------- Cabecera ----------------
-_motivo = ("Este tablero nace porque en CloudMetrics el churn existe pero estaba repartido entre soporte, "
-           "producto, pagos y retiros, sin una medida unica ni confiable. Reune esas fuentes en un solo lugar "
-           "para que el equipo de Customer Experience pueda medir el churn de forma estandar, entender sus "
-           "causas raiz y actuar de forma continua, no como un analisis puntual.")
+_motivo = ("Este tablero centraliza la información clave de churn en CloudMetrics para medirlo de forma "
+           "consistente, identificar sus principales causas y facilitar acciones continuas desde Customer Experience. "
+          )
 _header = (
     '<div style="text-align:center; margin-bottom:0.2rem;">'
     '<div style="display:flex; justify-content:center; align-items:center; gap:12px;">'
