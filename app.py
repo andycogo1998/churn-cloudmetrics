@@ -13,14 +13,51 @@ import plotly.express as px
 
 st.set_page_config(page_title="Churn CloudMetrics", layout="wide", page_icon="📊")
 
-VERDE = "#16a085"; ROJO = "#e74c3c"; GRIS = "#7f8c8d"; AZUL = "#2980b9"; NARANJA = "#f39c12"
+# Paleta inspirada en la identidad de Alegra (turquesa de marca).
+# Si conseguis el hex oficial, cambialo solo aca y se propaga a todo el dashboard.
+TEAL = "#00B8A9"        # color de marca, positivo, cuentas activas
+TEAL_OSCURO = "#0A8C82"
+NAVY = "#16284B"        # texto y titulos
+CORAL = "#FF6B6B"       # churn, negativo
+AMBAR = "#F4A340"       # advertencia, suspendido
+GRIS = "#9AA7B0"        # neutro, inactivo
+# Alias para mantener compatibilidad con el resto del dashboard
+VERDE = TEAL; ROJO = CORAL; AZUL = TEAL_OSCURO; NARANJA = AMBAR
 TPL = "plotly_white"
+ESCALA_CHURN = [TEAL, AMBAR, CORAL]
 
-st.markdown("""<style>
-.block-container {padding-top: 2rem;}
-[data-testid="stMetricValue"] {font-size: 1.5rem;}
-h1,h2,h3 {color:#1f2d3d;}
+st.markdown(f"""<style>
+.block-container {{padding-top: 1.5rem;}}
+h1,h2,h3 {{color:{NAVY};}}
+/* Centrar las tarjetas de metricas */
+[data-testid="stMetric"] {{
+    text-align: center;
+    background: #ffffff;
+    border: 1px solid #eef1f4;
+    border-radius: 12px;
+    padding: 14px 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}}
+[data-testid="stMetric"] label {{justify-content: center; width: 100%;}}
+[data-testid="stMetricValue"] {{font-size: 1.5rem; justify-content: center;}}
+[data-testid="stMetricLabel"] {{justify-content: center;}}
+div[data-testid="stMetric"] > div {{justify-content: center; align-items: center;}}
 </style>""", unsafe_allow_html=True)
+
+
+def logo_cloudmetrics():
+    # Logo inventado: nube + barras de metrica, en turquesa de marca
+    return f"""
+    <svg width="54" height="54" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M20 42h24a11 11 0 0 0 1.5-21.9A15 15 0 0 0 17 24.5 10 10 0 0 0 20 42z"
+            fill="{TEAL}" opacity="0.18"/>
+      <path d="M22 40h22a9 9 0 0 0 1-17.9A13 13 0 0 0 19 26 8 8 0 0 0 22 40z"
+            fill="none" stroke="{TEAL}" stroke-width="2.4"/>
+      <rect x="25" y="31" width="3.4" height="7" rx="1.2" fill="{TEAL_OSCURO}"/>
+      <rect x="30.3" y="27" width="3.4" height="11" rx="1.2" fill="{TEAL}"/>
+      <rect x="35.6" y="23" width="3.4" height="15" rx="1.2" fill="{AMBAR}"/>
+    </svg>
+    """
 
 CENTROIDES = {
     "Colombia": (4.57, -74.30), "México": (23.63, -102.55), "Costa Rica": (9.75, -83.75),
@@ -182,23 +219,50 @@ st.sidebar.markdown("---")
 st.sidebar.caption(f"Mostrando {len(d):,} de {len(df):,} cuentas")
 
 
-# ---------------- KPIs ----------------
-st.title("Dashboard de Churn CloudMetrics")
-st.caption("Sistema de control continuo de Customer Experience. Usuarios, retiros, uso de producto y soporte.")
+# ---------------- Cabecera ----------------
+st.markdown(
+    f"""
+    <div style="text-align:center; margin-bottom:0.2rem;">
+        <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
+            {logo_cloudmetrics()}
+            <h1 style="margin:0; color:{NAVY};">CloudMetrics · Centro de Control de Churn</h1>
+        </div>
+        <p style="max-width:820px; margin:0.6rem auto 0; color:#5b6b7b; font-size:0.98rem;">
+            Este tablero nace porque en CloudMetrics el churn existe pero estaba repartido entre soporte,
+            producto, pagos y retiros, sin una medida unica ni confiable. Reune esas fuentes en un solo lugar
+            para que el equipo de Customer Experience pueda medir el churn de forma estandar, entender sus
+            causas raiz y actuar de forma continua, no como un analisis puntual.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown("<br>", unsafe_allow_html=True)
 
 total = len(d); churned = int(d[col_churn].sum()); tasa = churned / total if total else 0
+churn_teorico = d["churn_retiro"].mean() if total else 0
 activos = d[d.estado_cuenta == "activo"]
 mrr_total = d.mrr.sum(); mrr_activo = activos.mrr.sum(); mrr_riesgo = d.loc[d[col_churn], "mrr"].sum()
 arpu = mrr_activo / len(activos) if len(activos) else 0
 tasa_activacion = d["activado"].mean() if total else 0
 
-k = st.columns(6)
-k[0].metric("Cuentas", f"{total:,}")
-k[1].metric("Tasa de churn", f"{tasa:.1%}", f"{churned:,} cuentas", delta_color="off")
-k[2].metric("MRR activo", f"${mrr_activo:,.0f}")
-k[3].metric("MRR en riesgo", f"${mrr_riesgo:,.0f}", f"{(mrr_riesgo/mrr_total if mrr_total else 0):.0%}", delta_color="off")
-k[4].metric("ARPU activos", f"${arpu:,.0f}")
-k[5].metric("Activacion", f"{tasa_activacion:.0%}", help="Facturo al menos una vez el mes 1")
+r1 = st.columns(4)
+r1[0].metric("Cuentas totales", f"{total:,}",
+             help="Cantidad de cuentas que entran en el filtro actual.")
+r1[1].metric("Churn real", f"{tasa:.1%}",
+             help="Cuentas en estado distinto de activo (cancelado, inactivo o suspendido) sobre el total. Es la verdad operativa del churn.")
+r1[2].metric("Churn teorico (retiros)", f"{churn_teorico:.1%}",
+             help="Cuentas con ficha formal de retiro sobre el total. Es un piso: solo 1 de cada 3 bajas tiene registro, por eso es menor al churn real.")
+r1[3].metric("MRR activo", f"${mrr_activo:,.0f}",
+             help="Ingreso recurrente mensual que aportan hoy las cuentas activas, en USD.")
+
+r2 = st.columns(3)
+r2[0].metric("MRR en riesgo", f"${mrr_riesgo:,.0f}",
+             help="Ingreso recurrente mensual de las cuentas que ya churnearon. Es la perdida que estamos midiendo.")
+r2[1].metric("ARPU activos", f"${arpu:,.0f}",
+             help="Ingreso promedio por cuenta activa. MRR activo dividido por cuentas activas.")
+r2[2].metric("Llegaron a facturar", f"{tasa_activacion:.0%}",
+             help="Porcentaje de cuentas que emitieron al menos una factura en su primer mes. Mide si el cliente realmente arranco a usar el producto.")
 st.markdown("---")
 
 nombres_tabs = ["Resumen", "Mapa", "Negocio", "Causa raiz", "Soporte", "Calidad de datos"]
@@ -214,20 +278,58 @@ def churn_por(data, col):
 
 # ---------------- Resumen ----------------
 with T["Resumen"]:
+    # ---- Cuentas activas hoy ----
+    st.subheader("Cuentas activas hoy")
+    st.caption("Como se compone la base que hoy sigue pagando. Util para entender quien es el cliente actual.")
+    act = d[d.estado_cuenta == "activo"]
+    cols = st.columns(4)
+    cortes = [("segmento", "Por segmento", cols[0]), ("plan", "Por plan", cols[1]),
+              ("pais", "Por pais", cols[2]), ("metodo_pago", "Por metodo de pago", cols[3])]
+    for col, titulo, cont in cortes:
+        with cont:
+            g = act[col].value_counts().reset_index()
+            g.columns = [col, "cuentas"]
+            g = g.sort_values("cuentas", ascending=True)
+            fig = px.bar(g, x="cuentas", y=col, orientation="h", template=TPL,
+                         text="cuentas", color_discrete_sequence=[TEAL])
+            fig.update_traces(textposition="outside")
+            fig.update_layout(title=titulo, height=300, showlegend=False,
+                              margin=dict(t=40, b=10), yaxis_title="", xaxis_title="")
+            st.plotly_chart(fig, use_container_width=True)
+    st.caption("Nota: el metodo de pago tiene inconsistencias geograficas documentadas (PSE y OXXO fuera de su pais). Tomar como referencia, no como dato confiable por pais.")
+
+    st.markdown("---")
+
+    # ---- Registros en el tiempo ----
+    st.markdown("##### Cuentas registradas por mes")
+    st.caption("Cuantas cuentas se sumaron cada mes, separando las que hoy siguen activas de las que ya churnearon. Muestra el crecimiento y como le fue a cada camada.")
+    reg = d.dropna(subset=["fecha_registro"]).copy()
+    reg["mes"] = reg["fecha_registro"].dt.to_period("M").dt.to_timestamp()
+    reg["situacion"] = np.where(reg[col_churn], "Churneada", "Activa hoy")
+    g = reg.groupby(["mes", "situacion"]).size().reset_index(name="cuentas")
+    fig = px.bar(g, x="mes", y="cuentas", color="situacion", template=TPL, barmode="stack",
+                 color_discrete_map={"Activa hoy": TEAL, "Churneada": CORAL})
+    fig.update_layout(height=340, margin=dict(t=10, b=10), xaxis_title="", yaxis_title="cuentas",
+                      legend_title="", legend=dict(orientation="h", y=1.1, x=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # ---- Donde se concentra el churn ----
     st.subheader("Donde se concentra el churn")
     st.caption("Tasa de churn por corte. Barra mas alta = grupo que mas se va.")
     cols = st.columns(3)
     for col, titulo, cont in [("segmento", "Por segmento", cols[0]), ("plan", "Por plan", cols[1]), ("pais", "Por pais", cols[2])]:
         with cont:
             g = churn_por(d, col)
-            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[ROJO])
+            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
             fig.update_traces(textposition="outside")
             fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False, yaxis_title="", xaxis_title="")
             st.plotly_chart(fig, use_container_width=True)
     st.markdown("##### Composicion de la base por estado")
     g = d.estado_cuenta.value_counts().reset_index(); g.columns = ["estado", "cuentas"]
     fig = px.bar(g, x="cuentas", y="estado", orientation="h", template=TPL, color="estado",
-                 color_discrete_map={"activo": VERDE, "suspendido": NARANJA, "inactivo": GRIS, "cancelado": ROJO}, text="cuentas")
+                 color_discrete_map={"activo": TEAL, "suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}, text="cuentas")
     fig.update_layout(height=250, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="cuentas")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -243,7 +345,7 @@ with T["Mapa"]:
     g = g.dropna(subset=["lat", "lon"])
     fig = px.scatter_geo(g, lat="lat", lon="lon", size="cuentas", color="tasa", hover_name="pais",
                          hover_data={"cuentas": True, "tasa": ":.1%", "mrr": ":$,.0f", "lat": False, "lon": False},
-                         color_continuous_scale=["#16a085", "#f1c40f", "#e74c3c"], size_max=55, template=TPL)
+                         color_continuous_scale=ESCALA_CHURN, size_max=55, template=TPL)
     fig.update_geos(fitbounds="locations", showcountries=True, countrycolor="#cccccc", showland=True,
                     landcolor="#f7f7f7", showocean=True, oceancolor="#eaf2f8")
     fig.update_layout(height=500, margin=dict(t=10, b=10), coloraxis_colorbar_title="churn")
@@ -359,7 +461,7 @@ with T["Soporte"]:
                 st.caption("CSAT promedio por tema (mas bajo = mas fricion)")
                 g = c.groupby("tema_principal").csat_score.mean().reset_index().sort_values("csat_score")
                 fig = px.bar(g, x="csat_score", y="tema_principal", orientation="h", template=TPL, color="csat_score",
-                             color_continuous_scale=["#e74c3c", "#f1c40f", "#16a085"], range_x=[1, 5])
+                             color_continuous_scale=[CORAL, AMBAR, TEAL], range_x=[1, 5])
                 fig.update_layout(height=340, margin=dict(t=10, b=10), yaxis_title="", coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
             t1, t2 = st.columns(2)
