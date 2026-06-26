@@ -28,12 +28,33 @@ CENTROIDES = {
 }
 
 
-def buscar(patrones):
-    for pat in patrones:
-        m = glob.glob(f"**/*{pat}*.csv", recursive=True)
-        if m:
-            return m[0]
-    return None
+def listar_csvs():
+    return sorted(glob.glob("**/*.csv", recursive=True))
+
+
+@st.cache_data
+def clasificar(firma):
+    """Detecta cada fuente por sus columnas, no por el nombre del archivo."""
+    base = chat = wa = tel = None
+    detalle = []
+    for f in firma:
+        try:
+            cols = set(pd.read_csv(f, nrows=0).columns)
+        except Exception:
+            continue
+        tipo = "otro"
+        if "estado_cuenta" in cols and ("tipo_retiro" in cols or "fecha_primer_login" in cols):
+            base = f; tipo = "base unificada"
+        elif "csat_score" in cols:
+            chat = chat or f; tipo = "soporte chat"
+        elif "sentimiento_usuario" in cols:
+            wa = wa or f; tipo = "soporte whatsapp"
+        elif "nps_post_llamada" in cols or "escalo_a_especialista" in cols:
+            tel = tel or f; tipo = "soporte telefono"
+        elif "estado_cuenta" in cols and base is None:
+            base = f; tipo = "base (solo usuarios)"
+        detalle.append((f, tipo))
+    return base, chat, wa, tel, detalle
 
 
 @st.cache_data
@@ -74,10 +95,7 @@ def cargar_base(path):
 
 
 @st.cache_data
-def cargar_soporte():
-    pc = buscar(["soporte_chat", "04a", "_chat"])
-    pw = buscar(["soporte_whatsapp", "whatsapp", "04b"])
-    pt = buscar(["soporte_telefono", "telefono", "04c"])
+def cargar_soporte(pc, pw, pt):
     chat = pd.read_csv(pc, dtype=str) if pc else None
     wa = pd.read_csv(pw, dtype=str) if pw else None
     tel = pd.read_csv(pt, dtype=str) if pt else None
@@ -121,13 +139,15 @@ def agregar_usuario(chat, wa, tel):
     return out
 
 
-DATA_PATH = buscar(["unificada", "tabla_unificada"])
+FIRMA = tuple(listar_csvs())
+DATA_PATH, P_CHAT, P_WA, P_TEL, DETALLE = clasificar(FIRMA)
 if DATA_PATH is None:
-    st.error("No se encontro tabla_unificada_churn.csv en el repo.")
+    st.error("No se encontro la base unificada (ningun CSV con columna estado_cuenta). Archivos vistos: "
+             + ", ".join(FIRMA) if FIRMA else "ningun CSV en el repo.")
     st.stop()
 
 df = cargar_base(DATA_PATH)
-chat, wa, tel = cargar_soporte()
+chat, wa, tel = cargar_soporte(P_CHAT, P_WA, P_TEL)
 agg = agregar_usuario(chat, wa, tel)
 HAY_SOPORTE = agg is not None
 
@@ -312,8 +332,11 @@ with T["Causa raiz"]:
 
 # ---------------- Soporte ----------------
 with T["Soporte"]:
+    with st.expander("Diagnostico de archivos detectados"):
+        st.write("CSV encontrados en el repo y como los clasifico la app:")
+        st.dataframe(pd.DataFrame(DETALLE, columns=["archivo", "clasificado como"]), hide_index=True, use_container_width=True)
     if not HAY_SOPORTE:
-        st.warning("No se encontraron los archivos de soporte. Subi soporte_chat.csv, soporte_whatsapp.csv y soporte_telefono.csv al repo.")
+        st.warning("No se detectaron archivos de soporte. Revisa el diagnostico de arriba: cada archivo de soporte debe conservar sus columnas originales (csat_score para chat, sentimiento_usuario para whatsapp, nps_post_llamada para telefono).")
     else:
         st.subheader("Analisis por canal de soporte")
         canal = st.selectbox("Elegi el canal", ["Chat", "WhatsApp", "Telefono"])
