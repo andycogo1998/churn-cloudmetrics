@@ -39,25 +39,24 @@ h1,h2,h3 {{color:{NAVY};}}
     box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }}
 [data-testid="stMetric"] label {{justify-content: center; width: 100%;}}
-[data-testid="stMetricValue"] {{font-size: 1.5rem; justify-content: center;}}
+[data-testid="stMetricValue"] {{font-size: 1.5rem; justify-content: center; color: {NAVY};}}
 [data-testid="stMetricLabel"] {{justify-content: center;}}
+[data-testid="stMetricLabel"] p {{color: #5b6b7b; font-weight: 600;}}
 div[data-testid="stMetric"] > div {{justify-content: center; align-items: center;}}
 </style>""", unsafe_allow_html=True)
 
 
 def logo_cloudmetrics():
-    # Logo inventado: nube + barras de metrica, en turquesa de marca
-    return f"""
-    <svg width="54" height="54" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M20 42h24a11 11 0 0 0 1.5-21.9A15 15 0 0 0 17 24.5 10 10 0 0 0 20 42z"
-            fill="{TEAL}" opacity="0.18"/>
-      <path d="M22 40h22a9 9 0 0 0 1-17.9A13 13 0 0 0 19 26 8 8 0 0 0 22 40z"
-            fill="none" stroke="{TEAL}" stroke-width="2.4"/>
-      <rect x="25" y="31" width="3.4" height="7" rx="1.2" fill="{TEAL_OSCURO}"/>
-      <rect x="30.3" y="27" width="3.4" height="11" rx="1.2" fill="{TEAL}"/>
-      <rect x="35.6" y="23" width="3.4" height="15" rx="1.2" fill="{AMBAR}"/>
-    </svg>
-    """
+    # Logo inventado: nube + barras de metrica, en turquesa de marca. Compacto (sin saltos de linea).
+    return (
+        f'<svg width="54" height="54" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        f'<path d="M20 42h24a11 11 0 0 0 1.5-21.9A15 15 0 0 0 17 24.5 10 10 0 0 0 20 42z" fill="{TEAL}" opacity="0.18"/>'
+        f'<path d="M22 40h22a9 9 0 0 0 1-17.9A13 13 0 0 0 19 26 8 8 0 0 0 22 40z" fill="none" stroke="{TEAL}" stroke-width="2.4"/>'
+        f'<rect x="25" y="31" width="3.4" height="7" rx="1.2" fill="{TEAL_OSCURO}"/>'
+        f'<rect x="30.3" y="27" width="3.4" height="11" rx="1.2" fill="{TEAL}"/>'
+        f'<rect x="35.6" y="23" width="3.4" height="15" rx="1.2" fill="{AMBAR}"/>'
+        f'</svg>'
+    )
 
 CENTROIDES = {
     "Colombia": (4.57, -74.30), "México": (23.63, -102.55), "Costa Rica": (9.75, -83.75),
@@ -220,23 +219,20 @@ st.sidebar.caption(f"Mostrando {len(d):,} de {len(df):,} cuentas")
 
 
 # ---------------- Cabecera ----------------
-st.markdown(
-    f"""
-    <div style="text-align:center; margin-bottom:0.2rem;">
-        <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
-            {logo_cloudmetrics()}
-            <h1 style="margin:0; color:{NAVY};">CloudMetrics · Centro de Control de Churn</h1>
-        </div>
-        <p style="max-width:820px; margin:0.6rem auto 0; color:#5b6b7b; font-size:0.98rem;">
-            Este tablero nace porque en CloudMetrics el churn existe pero estaba repartido entre soporte,
-            producto, pagos y retiros, sin una medida unica ni confiable. Reune esas fuentes en un solo lugar
-            para que el equipo de Customer Experience pueda medir el churn de forma estandar, entender sus
-            causas raiz y actuar de forma continua, no como un analisis puntual.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
+_motivo = ("Este tablero nace porque en CloudMetrics el churn existe pero estaba repartido entre soporte, "
+           "producto, pagos y retiros, sin una medida unica ni confiable. Reune esas fuentes en un solo lugar "
+           "para que el equipo de Customer Experience pueda medir el churn de forma estandar, entender sus "
+           "causas raiz y actuar de forma continua, no como un analisis puntual.")
+_header = (
+    '<div style="text-align:center; margin-bottom:0.2rem;">'
+    '<div style="display:flex; justify-content:center; align-items:center; gap:12px;">'
+    f'{logo_cloudmetrics()}'
+    f'<h1 style="margin:0; color:{NAVY};">CloudMetrics · Centro de Control de Churn</h1>'
+    '</div>'
+    f'<p style="max-width:820px; margin:0.6rem auto 0; color:#5b6b7b; font-size:0.98rem;">{_motivo}</p>'
+    '</div>'
 )
+st.markdown(_header, unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 total = len(d); churned = int(d[col_churn].sum()); tasa = churned / total if total else 0
