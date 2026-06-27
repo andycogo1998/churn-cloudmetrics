@@ -622,34 +622,91 @@ with T["Churn"]:
 # ---------------- Negocio ----------------
 with T["Negocio"]:
     st.subheader("Metricas de negocio")
+    st.caption("Salud de la base que hoy paga. Todo en esta seccion se calcula sobre las cuentas activas.")
+    act = d[d.estado_cuenta == "activo"].copy()
+    n_act = len(act)
+
+    # --- KPIs de la base activa ---
+    k = st.columns(4)
+    k[0].metric("MRR activo", f"${act.mrr.sum():,.0f}", delta_color="off",
+                help="Ingreso recurrente mensual de las cuentas activas.")
+    k[1].metric("ARPU", f"${(act.mrr.mean() if n_act else 0):,.1f}", delta_color="off",
+                help="Ingreso promedio por cuenta activa (MRR / cuentas activas).")
+    if "sesiones_promedio_semana" in act.columns:
+        ses = pd.to_numeric(act["sesiones_promedio_semana"], errors="coerce").mean()
+        k[2].metric("Sesiones / semana", f"{ses:.1f}", delta_color="off",
+                    help="Sesiones promedio por semana de las cuentas activas. Mide enganche.")
+    if "usuarios_adicionales" in act.columns:
+        ua = pd.to_numeric(act["usuarios_adicionales"], errors="coerce").mean()
+        k[3].metric("Usuarios adicionales", f"{ua:.1f}", delta_color="off",
+                    help="Promedio de usuarios extra por cuenta activa. Proxy de expansion dentro de la cuenta.")
+
+    st.markdown("---")
+
+    # --- MRR por plan y por segmento (solo activas) ---
     c1, c2 = st.columns(2)
     with c1:
-        st.caption("MRR por plan")
-        g = d.groupby("plan")["mrr"].sum().reset_index().sort_values("mrr")
-        fig = px.bar(g, x="mrr", y="plan", orientation="h", template=TPL, text=g["mrr"].map("${:,.0f}".format), color_discrete_sequence=[AZUL])
-        fig.update_layout(height=300, showlegend=False, margin=dict(t=10, b=10), xaxis_title="MRR USD", yaxis_title="")
+        st.caption("MRR por plan (cuentas activas)")
+        g = act.groupby("plan")["mrr"].sum().reset_index().sort_values("mrr")
+        tope = g["mrr"].max() * 1.25 if len(g) else 1
+        fig = px.bar(g, x="mrr", y="plan", orientation="h", template=TPL, text=g["mrr"].map("${:,.0f}".format),
+                     color="plan", color_discrete_sequence=[TEAL, CORAL, AMBAR, NAVY, GRIS, TEAL_OSCURO])
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        fig.update_layout(height=300, showlegend=False, margin=dict(t=10, b=10), xaxis_title="MRR USD", yaxis_title="",
+                          xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
         st.plotly_chart(fig, use_container_width=True)
     with c2:
-        st.caption("MRR por segmento")
-        g = d.groupby("segmento")["mrr"].sum().reset_index()
-        fig = px.pie(g, names="segmento", values="mrr", template=TPL, hole=0.5, color_discrete_sequence=[AZUL, VERDE])
+        st.caption("MRR por segmento (cuentas activas)")
+        g = act.groupby("segmento")["mrr"].sum().reset_index()
+        fig = px.pie(g, names="segmento", values="mrr", template=TPL, hole=0.5, color_discrete_sequence=[TEAL, NAVY])
         fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13))
-        fig.update_layout(height=300, margin=dict(t=10, b=10))
+        fig.update_layout(height=300, margin=dict(t=10, b=10), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
-    st.markdown("##### Embudo de activacion")
-    st.caption("Cuantas cuentas completan cada hito del onboarding. Donde mas cae es donde se pierde valor.")
-    hitos = [("configuracion_empresa_completa", "Config. empresa"), ("empleados_cargados", "Empleados cargados"),
-             ("plan_cuentas_configurado", "Plan de cuentas"), ("primer_factura_emitida", "Primera factura"),
-             ("integracion_banco_conectada", "Banco conectado")]
-    filas = [{"hito": l, "cuentas": d[c].fillna("").str.lower().eq("si").sum()} for c, l in hitos if c in d.columns]
-    if filas:
-        fig = px.funnel(pd.DataFrame(filas), x="cuentas", y="hito", template=TPL, color_discrete_sequence=[VERDE])
-        fig.update_layout(height=320, margin=dict(t=10, b=10), yaxis_title="")
+
+    st.markdown("---")
+
+    # --- Completitud de hitos y adopcion de modulos (cuentas activas) ---
+    st.markdown("##### Completitud de hitos y adopcion de modulos")
+    st.caption("Que porcentaje de las cuentas activas completo cada hito de arranque y activo cada modulo. "
+               "En verde lo que se completo, en rojo lo que falta. Ordenado de mayor a menor adopcion.")
+    def pct_si(col):
+        return act[col].fillna("").str.lower().eq("si").mean() if col in act.columns else None
+    hitos = []
+    if "configuracion_empresa_completa" in act.columns: hitos.append(("Config. empresa", pct_si("configuracion_empresa_completa")))
+    if "plan_cuentas_configurado" in act.columns: hitos.append(("Plan de cuentas", pct_si("plan_cuentas_configurado")))
+    if "empleados_cargados" in act.columns: hitos.append(("Empleados cargados", pct_si("empleados_cargados")))
+    if "facturas_emitidas_mes1" in act.columns:
+        hitos.append(("Primera factura", (pd.to_numeric(act["facturas_emitidas_mes1"], errors="coerce").fillna(0) > 0).mean()))
+    if "integracion_banco_conectada" in act.columns: hitos.append(("Banco conectado", pct_si("integracion_banco_conectada")))
+    if "modulo_cxc_activo" in act.columns: hitos.append(("Modulo CxC", pct_si("modulo_cxc_activo")))
+    if "modulo_nomina_activo" in act.columns: hitos.append(("Modulo Nomina", pct_si("modulo_nomina_activo")))
+    if "modulo_inventario_activo" in act.columns: hitos.append(("Modulo Inventario", pct_si("modulo_inventario_activo")))
+    hitos = [(h, p) for h, p in hitos if p is not None]
+    if hitos:
+        hitos.sort(key=lambda x: x[1])  # ascending para que el de mayor adopcion quede arriba en barra horizontal
+        orden = [h for h, _ in hitos]
+        filas = []
+        for h, p in hitos:
+            filas.append({"hito": h, "estado": "Completado", "pct": p})
+            filas.append({"hito": h, "estado": "No completado", "pct": 1 - p})
+        dfh = pd.DataFrame(filas)
+        fig = px.bar(dfh, x="pct", y="hito", color="estado", orientation="h", template=TPL, barmode="stack",
+                     text=dfh["pct"].map("{:.0%}".format),
+                     color_discrete_map={"Completado": TEAL, "No completado": CORAL},
+                     category_orders={"hito": orden, "estado": ["Completado", "No completado"]})
+        fig.update_traces(textposition="inside", insidetextanchor="middle", textfont=dict(color="white", size=11))
+        fig.update_layout(height=380, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
+                          yaxis_title="", xaxis_title="", legend_title="",
+                          legend=dict(orientation="h", y=1.08, x=0), yaxis=dict(automargin=True))
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("Los hitos de arranque (configurar empresa, primera factura, plan de cuentas) tienen alta adopcion; "
+                   "los modulos de nicho como nomina e inventario, mucho menor. Esa diferencia es la que separa una "
+                   "cuenta bien activada de una que apenas usa el producto.")
 
 
 
 # ---------------- Causa raiz ----------------
+
 with T["Causa raiz"]:
     st.subheader("La activacion temprana es la causa raiz")
     st.markdown(
