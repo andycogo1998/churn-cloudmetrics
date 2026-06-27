@@ -309,24 +309,62 @@ def churn_por(data, col):
 with T["Resumen"]:
     act = d[d.estado_cuenta == "activo"]
 
+    # ---- Diagnostico automatico de la base activa (reglas) ----
+    n_act = len(act)
+    mrr_act = act.mrr.sum()
+    riesgo_mask = act["fallas_activacion"] >= 2
+    en_riesgo = int(riesgo_mask.sum())
+    pct_riesgo = en_riesgo / n_act if n_act else 0
+    alertas = []
+    if n_act:
+        por_pais = act.assign(r=riesgo_mask).groupby("pais")["r"].mean()
+        if len(por_pais) and por_pais.max() > pct_riesgo + 0.08:
+            alertas.append(f"{por_pais.idxmax()} concentra mas arranque flojo que el promedio: {por_pais.max():.0%} de sus activas en riesgo frente al {pct_riesgo:.0%} general.")
+        por_plan = act.assign(r=riesgo_mask).groupby("plan")["r"].mean()
+        if len(por_plan) and por_plan.max() > pct_riesgo + 0.08:
+            alertas.append(f"El plan {por_plan.idxmax()} arranca peor que el resto: {por_plan.max():.0%} de sus activas en riesgo.")
+        if "friccion" in act.columns and act["friccion"].mean() > 0.45:
+            alertas.append(f"La friccion de soporte en la base activa es alta ({act['friccion'].mean():.0%} tuvo alguna mala experiencia), un acelerador conocido del churn.")
+    nivel = "ok" if pct_riesgo < 0.20 else ("warn" if pct_riesgo < 0.35 else "bad")
+    _bordes = {"ok": TEAL, "warn": AMBAR, "bad": CORAL}
+    cuerpo = (f"<b>La base activa es de {n_act:,} cuentas con MRR ${mrr_act:,.0f}.</b> "
+              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) tienen un arranque flojo, dos o mas pasos de onboarding sin completar, "
+              f"que es el grupo con mas riesgo de churn.")
+    if alertas:
+        cuerpo += "<br><b>Anomalias detectadas:</b><ul style='margin:4px 0 0 0; padding-left:18px;'>" + "".join(f"<li>{a}</li>" for a in alertas) + "</ul>"
+    else:
+        cuerpo += "<br>No se detectaron anomalias por pais, plan ni soporte en este corte."
+    st.markdown(
+        f"<div style='background:#f6fafa; border-left:4px solid {_bordes[nivel]}; border-radius:8px; padding:12px 16px; margin-bottom:6px;'>"
+        f"<div style='font-size:0.78rem; font-weight:700; color:{_bordes[nivel]}; letter-spacing:.04em;'>DIAGNOSTICO AUTOMATICO DE LA BASE ACTIVA</div>"
+        f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{cuerpo}</div></div>", unsafe_allow_html=True)
+
     # ---- Tarjetas por estado, cada una con su MRR ----
     estados_cfg = [
-        ("Cuentas", None, "Cuentas que se encuentran en el filtro actual."),
-        ("Activas", "activo", "Cuentas que hoy siguen activas y pagando."),
-        ("Suspendidas", "suspendido", "Cuentas cortadas, normalmente por falta de pago. Recuperables con cobranza."),
-        ("Inactivas", "inactivo", "Cuentas que dejaron de tener actividad sin darse de baja formal."),
-        ("Canceladas", "cancelado", "Bajas definitivas de la cuenta."),
+        ("Cuentas", None, GRIS, "", "Cuentas que se encuentran en el filtro actual."),
+        ("Activas", "activo", TEAL, "\u25b2 ", "Cuentas que hoy siguen activas y pagando."),
+        ("Suspendidas", "suspendido", CORAL, "\u25bc ", "Cuentas cortadas, normalmente por falta de pago. Recuperables con cobranza."),
+        ("Inactivas", "inactivo", AMBAR, "\u25bc ", "Cuentas que dejaron de tener actividad sin darse de baja formal."),
+        ("Canceladas", "cancelado", CORAL, "\u25bc ", "Bajas definitivas de la cuenta."),
     ]
     kc = st.columns(5)
-    for (lbl, estado, ayuda), c in zip(estados_cfg, kc):
+    for (lbl, estado, color, arrow, ayuda), c in zip(estados_cfg, kc):
         sub = d if estado is None else d[d.estado_cuenta == estado]
-        c.metric(lbl, f"{len(sub):,}", f"MRR ${sub.mrr.sum():,.0f}", delta_color="off", help=ayuda)
+        card = (
+            f'<div title="{ayuda}" style="background:#fff;border:1px solid #eef1f4;border-radius:12px;'
+            f'padding:14px 8px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.03);">'
+            f'<div style="font-size:0.8rem;color:#7b8794;">{lbl}</div>'
+            f'<div style="font-size:1.7rem;font-weight:700;color:{NAVY};line-height:1.25;">{len(sub):,}</div>'
+            f'<div style="font-size:0.82rem;font-weight:700;color:{color};">{arrow}MRR ${sub.mrr.sum():,.0f}</div>'
+            f'</div>'
+        )
+        c.markdown(card, unsafe_allow_html=True)
 
     st.markdown("---")
 
     # ---- Cuentas activas hoy ----
     st.subheader("Cuentas activas hoy")
-    st.caption("Como se compone la base que hoy sigue pagando. Util para entender quien es el cliente actual.")
+    st.caption("Como se componen la base de usuarios que sigue pagando actualmente.")
 
     cseg = st.columns([1, 2, 1])
     with cseg[1]:
@@ -344,38 +382,21 @@ with T["Resumen"]:
             g = act[col].value_counts().reset_index()
             g.columns = [col, "cuentas"]
             g = g.sort_values("cuentas", ascending=True)
+            tope = g["cuentas"].max() * 1.18 if len(g) else 1
             fig = px.bar(g, x="cuentas", y=col, orientation="h", template=TPL,
                          text="cuentas", color_discrete_sequence=[TEAL])
             fig.update_traces(textposition="outside", cliponaxis=False)
-            fig.update_layout(title=titulo, height=300, showlegend=False, margin=dict(t=40, b=10),
+            fig.update_layout(title=titulo, height=300, showlegend=False, margin=dict(t=40, b=10, l=8, r=10),
                               yaxis_title="", xaxis_title="",
-                              xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+                              xaxis=dict(showgrid=False, range=[0, tope]),
+                              yaxis=dict(showgrid=False, automargin=True))
             st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("---")
-
-    # ---- Salud de activacion de la base activa ----
-    st.subheader("Salud de activacion de la base activa")
-    st.caption("Cuantas senales de activacion tiene incompletas cada cuenta ACTIVA hoy. Funciona como alerta temprana: las activas con mas senales incompletas son las mas expuestas a churn.")
-    sa = act.copy()
-    sa["nivel"] = sa["fallas_activacion"].clip(upper=5)
-    g = sa.groupby("nivel").size().reset_index(name="cuentas")
-    g["etq"] = g["nivel"].astype(int).astype(str)
-    fig = px.bar(g, x="etq", y="cuentas", template=TPL, text="cuentas",
-                 color="nivel", color_continuous_scale=[TEAL, AMBAR, CORAL])
-    fig.update_traces(textposition="outside", cliponaxis=False)
-    fig.update_layout(height=300, coloraxis_showscale=False, margin=dict(t=10, b=10),
-                      yaxis_title="cuentas activas", xaxis_title="senales de activacion incompletas",
-                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
-    st.plotly_chart(fig, use_container_width=True)
-    en_riesgo = int((sa["fallas_activacion"] >= 2).sum())
-    st.caption(f"{en_riesgo:,} cuentas activas tienen 2 o mas senales de activacion incompletas, el grupo donde el churn dispara. Son las candidatas naturales a una accion de retencion proactiva.")
 
     st.markdown("---")
 
     # ---- Cuentas registradas por mes ----
     st.markdown("##### Cuentas registradas por mes")
-    st.caption("Cuantas cuentas se registraron cada mes, identificando las que hoy siguen activas de las que ya hicieron churn.")
+    st.caption("Proporcion de la cohorte que sigue activa vs los que entran al churn.")
     reg = d.dropna(subset=["fecha_registro"]).copy()
     reg["mes"] = reg["fecha_registro"].dt.to_period("M").dt.to_timestamp()
     reg["situacion"] = np.where(reg[col_churn], "Churn", "Activa")
@@ -388,6 +409,33 @@ with T["Resumen"]:
     fig.update_layout(height=360, xaxis_title="mes de registro", yaxis_title="cuentas",
                       legend=dict(orientation="h", y=1.1, x=0))
     st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # ---- Termometro de arranque de la base activa ----
+    st.subheader("Termometro de arranque de la base activa")
+    st.caption("A cada cuenta activa le damos un puntaje de arranque segun cuantos pasos clave del onboarding "
+               "completo: configurar la empresa, emitir la primera factura, cargar el plan de cuentas, cargar "
+               "empleados y activar cuentas por cobrar. Cuanto peor arranca una cuenta, mas chances tiene de "
+               "terminar yendose. Este grafico muestra como esta hoy la base activa segun ese arranque.")
+    def _tier(n):
+        return "Arranque completo" if n == 0 else "Buen arranque" if n == 1 else "Arranque a medias" if n == 2 else "Arranque pobre"
+    sa = act.copy()
+    sa["tier"] = sa["fallas_activacion"].apply(_tier)
+    orden = ["Arranque completo", "Buen arranque", "Arranque a medias", "Arranque pobre"]
+    colmap = {"Arranque completo": TEAL, "Buen arranque": "#5FBDB3", "Arranque a medias": AMBAR, "Arranque pobre": CORAL}
+    g = sa["tier"].value_counts().reindex(orden, fill_value=0).reset_index()
+    g.columns = ["tier", "cuentas"]
+    fig = px.bar(g, x="tier", y="cuentas", template=TPL, text="cuentas", color="tier",
+                 color_discrete_map=colmap, category_orders={"tier": orden})
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_layout(height=320, showlegend=False, margin=dict(t=10, b=10),
+                      yaxis_title="cuentas activas", xaxis_title="",
+                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+    st.plotly_chart(fig, use_container_width=True)
+    flojo = int((sa["fallas_activacion"] >= 2).sum())
+    st.caption(f"{flojo:,} cuentas activas estan en arranque a medias o pobre. Son las que conviene acompanar con onboarding antes de que se vayan.")
+
 
 
 # ---------------- Mapa ----------------
