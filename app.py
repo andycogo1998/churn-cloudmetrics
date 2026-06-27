@@ -132,6 +132,13 @@ def cargar_base(path):
     for c in ["user_id.1", "user_id.2"]:
         if c in df.columns:
             df = df.drop(columns=c)
+    # La base final puede traer el soporte ya agregado. El dashboard lo recalcula
+    # desde los archivos de soporte crudos, asi que se descartan estas columnas
+    # para que el merge posterior no genere colisiones de nombres (_x / _y).
+    _sop_baked = ["chat_tickets", "chat_no_resueltos", "chat_reaperturas", "chat_csat_prom", "chat_tpr_prom",
+                  "wa_tickets", "wa_deriva_agente", "wa_negativos", "tel_llamadas", "tel_escalados", "tel_nps_prom",
+                  "usa_soporte", "soporte_tickets_total", "friccion", "canal_mas_usado"]
+    df = df.drop(columns=[c for c in _sop_baked if c in df.columns])
     num = ["monto_mensual_usd", "nps_salida", "dias_primer_factura", "facturas_emitidas_mes1",
            "facturas_emitidas_mes3", "reportes_generados_mes3", "usuarios_adicionales", "sesiones_promedio_semana"]
     for c in num:
@@ -513,18 +520,21 @@ with T["Causa raiz"]:
     if HAY_SOPORTE:
         st.markdown("##### Friccion de soporte: el segundo driver y alerta temprana")
         st.caption("No es el volumen de soporte lo que predice el churn, sino que el soporte falle.")
-        defs = [("Ticket reabierto", d.get("chat_reaperturas", 0) > 0),
-                ("Ticket sin resolver", d.get("chat_no_resueltos", 0) > 0),
-                ("Escalo a especialista", d.get("tel_escalo", 0) > 0),
-                ("Sentimiento negativo", d.get("wa_negativos", 0) > 0)]
-        senales = [{"senal": lbl, "con": d[mask][col_churn].mean(), "sin": d[~mask][col_churn].mean()} for lbl, mask in defs]
-        s = pd.DataFrame(senales).melt(id_vars="senal", var_name="grupo", value_name="tasa")
-        s["grupo"] = s["grupo"].map({"con": "Con la senal", "sin": "Sin la senal"})
-        fig = px.bar(s, x="senal", y="tasa", color="grupo", barmode="group", template=TPL,
-                     text=s["tasa"].map("{:.0%}".format), color_discrete_map={"Con la senal": CORAL, "Sin la senal": TEAL})
-        fig.update_traces(textposition="outside", cliponaxis=False)
-        fig.update_layout(height=340, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
-        st.plotly_chart(fig, use_container_width=True)
+        posibles = [("Ticket reabierto", "chat_reaperturas"), ("Ticket sin resolver", "chat_no_resueltos"),
+                    ("Escalo a especialista", "tel_escalo"), ("Sentimiento negativo", "wa_negativos")]
+        senales = []
+        for lbl, c in posibles:
+            if c in d.columns:
+                mask = pd.to_numeric(d[c], errors="coerce").fillna(0) > 0
+                senales.append({"senal": lbl, "con": d[mask][col_churn].mean(), "sin": d[~mask][col_churn].mean()})
+        if senales:
+            s = pd.DataFrame(senales).melt(id_vars="senal", var_name="grupo", value_name="tasa")
+            s["grupo"] = s["grupo"].map({"con": "Con la senal", "sin": "Sin la senal"})
+            fig = px.bar(s, x="senal", y="tasa", color="grupo", barmode="group", template=TPL,
+                         text=s["tasa"].map("{:.0%}".format), color_discrete_map={"Con la senal": CORAL, "Sin la senal": TEAL})
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            fig.update_layout(height=340, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
+            st.plotly_chart(fig, use_container_width=True)
 
     st.info("La activacion incompleta es la causa raiz dominante: una cuenta que arranca completa churnea cerca del 2%, una que no activa nada cerca del 93%. La friccion de soporte es el segundo driver y funciona como alerta temprana. El perfil del cliente (segmento, pais, plan) casi no mueve la aguja.")
 
