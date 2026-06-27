@@ -451,30 +451,10 @@ with T["General"]:
 
 # ---------------- Churn ----------------
 with T["Churn"]:
-    # --- Mapa de churn por pais ---
-    st.subheader("Cuentas y churn por pais")
-    st.caption("Tamano del circulo = cantidad de cuentas. Color = tasa de churn (mas rojo, mas churn).")
-    g = d.groupby("pais").agg(cuentas=("user_id", "count"), churn=(col_churn, "sum"), mrr=("mrr", "sum")).reset_index()
-    g["tasa"] = g["churn"] / g["cuentas"]
-    g["lat"] = g["pais"].map(lambda p: CENTROIDES.get(p, (None, None))[0])
-    g["lon"] = g["pais"].map(lambda p: CENTROIDES.get(p, (None, None))[1])
-    g = g.dropna(subset=["lat", "lon"])
-    fig = px.scatter_geo(g, lat="lat", lon="lon", size="cuentas", color="tasa", hover_name="pais",
-                         hover_data={"cuentas": True, "tasa": ":.1%", "mrr": ":$,.0f", "lat": False, "lon": False},
-                         color_continuous_scale=ESCALA_CHURN, size_max=55, template=TPL)
-    fig.update_geos(fitbounds="locations", showcountries=True, countrycolor="#cccccc", showland=True,
-                    landcolor="#f7f7f7", showocean=True, oceancolor="#eaf2f8")
-    fig.update_layout(height=460, margin=dict(t=10, b=10), coloraxis_colorbar_title="churn")
-    st.plotly_chart(fig, use_container_width=True)
-    g2 = g[["pais", "cuentas", "churn", "tasa", "mrr"]].sort_values("tasa", ascending=False).copy()
-    g2["tasa"] = g2["tasa"].map("{:.1%}".format); g2["mrr"] = g2["mrr"].map("${:,.0f}".format)
-    g2.columns = ["Pais", "Cuentas", "Churn", "Tasa churn", "MRR"]
-    st.dataframe(g2, hide_index=True, use_container_width=True)
+    PALETA = [TEAL, CORAL, AMBAR, NAVY, GRIS, TEAL_OSCURO, AZUL]
 
     # --- Donde se concentra el churn ---
-    st.markdown("---")
     st.subheader("Donde se concentra el churn")
-    st.caption("Que parte del churn aporta cada grupo y donde la tasa es mas alta. El reparto es bastante parejo: el perfil del cliente no es lo que dispara la baja.")
     cseg = st.columns([1, 2, 1])
     with cseg[1]:
         g = d[d[col_churn]]["segmento"].value_counts().reset_index()
@@ -482,33 +462,35 @@ with T["Churn"]:
         fig = px.pie(g, names="segmento", values="cuentas", template=TPL, hole=0.55,
                      color_discrete_sequence=[CORAL, AMBAR])
         fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=14))
-        fig.update_layout(title="Reparto del churn por segmento", height=320, margin=dict(t=46, b=10), showlegend=False)
+        fig.update_layout(title="Churn por segmento", height=320, margin=dict(t=46, b=10), showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
     cols = st.columns(2)
     for col, titulo, cont in [("plan", "Tasa de churn por plan", cols[0]), ("pais", "Tasa de churn por pais", cols[1])]:
         with cont:
             g = churn_por(d, col)
             tope = g["tasa"].max() * 1.18 if len(g) else 1
-            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
+            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL,
+                         color=col, color_discrete_sequence=PALETA)
             fig.update_traces(textposition="outside", cliponaxis=False)
             fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False,
                               yaxis_title="", xaxis_title="", yaxis=dict(range=[0, tope], automargin=True))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- Retiros totales (todas las cuentas no activas) ---
+    # --- Retiros totales ---
     st.markdown("---")
     st.subheader("Retiros totales")
     st.caption("Todas las cuentas que hoy no estan activas, dejen o no una ficha de retiro. Es el churn completo medido por estado de cuenta.")
     no_act = d[d.estado_cuenta != "activo"]
     n_no = len(no_act)
     con_ficha = int(no_act["churn_retiro"].sum())
+    mrr_total = d.mrr.sum()
     mt = st.columns(3)
     mt[0].metric("Cuentas en churn", f"{n_no:,}", f"{(n_no/len(d) if len(d) else 0):.0%} de la base", delta_color="off",
                  help="Cuentas en estado distinto de activo dentro del filtro.")
-    mt[1].metric("MRR perdido / mes", f"${no_act.mrr.sum():,.0f}", delta_color="off",
+    mt[1].metric("MRR perdido / mes", f"${no_act.mrr.sum():,.0f}", f"{(no_act.mrr.sum()/mrr_total if mrr_total else 0):.0%} del MRR", delta_color="off",
                  help="Ingreso recurrente mensual de las cuentas que ya no estan activas.")
     mt[2].metric("Con ficha de retiro", f"{con_ficha:,}", f"{(con_ficha/n_no if n_no else 0):.0%} del churn", delta_color="off",
-                 help="Cuantas de esas bajas dejaron un registro formal con el motivo. El resto se va sin dejar rastro.")
+                 help="Cuantas de esas bajas dejaron un registro formal con el motivo.")
     cc1, cc2 = st.columns(2)
     cmap_estado = {"suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}
     with cc1:
@@ -533,14 +515,10 @@ with T["Churn"]:
         fig.update_layout(height=280, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="MRR USD",
                           xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
         st.plotly_chart(fig, use_container_width=True)
-    st.info(f"Cada estado pide una accion distinta: suspendido es cobranza, inactivo es reactivacion (mas recuperable) "
-            f"y cancelado es win-back. Solo {con_ficha} de las {n_no} bajas dejaron ficha con motivo declarado: el resto "
-            f"se va sin registro, una brecha de medicion que conviene cerrar.")
 
-    # --- Retiros identificados (las que dejaron ficha) ---
+    # --- Retiros identificados ---
     st.markdown("---")
     st.subheader("Retiros identificados")
-    st.caption("Las cuentas con ficha de retiro. Es la unica fuente con el motivo declarado, pero cubre solo una parte del churn.")
     ret = d[d["churn_retiro"]].copy()
     if len(ret) == 0:
         st.info("No hay registros de retiro dentro del filtro actual.")
@@ -548,8 +526,8 @@ with T["Churn"]:
         voluntario = ret["tipo_retiro"].fillna("").str.lower().eq("voluntario").mean()
         nps_med = ret["nps_salida"].mean()
         m = st.columns(3)
-        m[0].metric("Fichas de retiro", f"{len(ret):,}", delta_color="off",
-                    help="Cuentas con registro formal de baja dentro del filtro.")
+        m[0].metric("Cuentas en churn con motivo identificado", f"{len(ret):,}", delta_color="off",
+                    help="Cuentas en churn que dejaron un registro formal con el motivo de baja.")
         m[1].metric("Bajas voluntarias", f"{voluntario:.0%}", delta_color="off",
                     help="Voluntario = el cliente decide irse. Involuntario suele ser corte por falta de pago.")
         m[2].metric("NPS de salida", f"{nps_med:.1f}" if pd.notna(nps_med) else "s/d", delta_color="off",
@@ -573,7 +551,6 @@ with T["Churn"]:
             fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13))
             fig.update_layout(height=360, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("Involuntario suele ser corte por falta de pago: recuperable con gestion de cobro. Voluntario es problema de valor.")
         c3, c4 = st.columns(2)
         with c3:
             st.caption("Con que producto lo reemplazan")
@@ -601,8 +578,44 @@ with T["Churn"]:
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("Sin NPS de salida en el filtro.")
-        st.info("La ficha de retiro es rica pero parcial. Cerrar esa brecha, que toda baja deje motivo registrado, "
-                "es una mejora de proceso concreta ademas de la solucion con IA.")
+
+    # --- Churn por pais (mapa, al final) ---
+    st.markdown("---")
+    st.subheader("Churn por pais")
+    g = d.groupby("pais").agg(cuentas=("user_id", "count"), churn=(col_churn, "sum")).reset_index()
+    g["tasa"] = g["churn"] / g["cuentas"]
+    mrr_churn = d[d[col_churn]].groupby("pais")["mrr"].sum()
+    g["mrr_churn"] = g["pais"].map(mrr_churn).fillna(0)
+    g["lat"] = g["pais"].map(lambda p: CENTROIDES.get(p, (None, None))[0])
+    g["lon"] = g["pais"].map(lambda p: CENTROIDES.get(p, (None, None))[1])
+    g = g.dropna(subset=["lat", "lon"])
+    fig = px.scatter_geo(g, lat="lat", lon="lon", size="cuentas", color="tasa", hover_name="pais",
+                         hover_data={"cuentas": True, "tasa": ":.1%", "mrr_churn": ":$,.0f", "lat": False, "lon": False},
+                         color_continuous_scale=ESCALA_CHURN, size_max=55, template=TPL)
+    fig.update_geos(fitbounds="locations", showcountries=True, countrycolor="#cccccc", showland=True,
+                    landcolor="#f7f7f7", showocean=True, oceancolor="#eaf2f8")
+    fig.update_layout(height=460, margin=dict(t=10, b=10), coloraxis_colorbar_title="churn")
+    st.plotly_chart(fig, use_container_width=True)
+    g2 = g[["pais", "cuentas", "churn", "tasa", "mrr_churn"]].sort_values("tasa", ascending=False).copy()
+    g2["tasa"] = g2["tasa"].map("{:.1%}".format); g2["mrr_churn"] = g2["mrr_churn"].map("${:,.0f}".format)
+    g2.columns = ["Pais", "Cuentas", "Churn", "Tasa churn", "MRR en churn"]
+    sty = (g2.style.hide(axis="index")
+           .set_properties(**{"text-align": "center"})
+           .set_table_styles([{"selector": "th", "props": [("text-align", "center")]}]))
+    st.table(sty)
+
+    # --- Detalle de cuentas en churn ---
+    st.markdown("---")
+    st.subheader("Detalle de cuentas en churn")
+    st.caption("Las cuentas consideradas churn segun la definicion elegida en el filtro lateral. Se puede ordenar por cualquier columna y descargar.")
+    chd = d[d[col_churn]].copy()
+    cols_show = [c for c in ["user_id", "nombre_empresa", "segmento", "pais", "plan", "mrr",
+                             "estado_cuenta", "fecha_ultimo_pago", "fallas_activacion"] if c in chd.columns]
+    tabla = chd[cols_show].rename(columns={"mrr": "mrr_usd", "fallas_activacion": "fallas_arranque"})
+    st.dataframe(tabla, hide_index=True, use_container_width=True)
+    st.download_button("Descargar CSV de cuentas en churn",
+                       tabla.to_csv(index=False).encode("utf-8"),
+                       "cuentas_en_churn.csv", "text/csv")
 
 
 
