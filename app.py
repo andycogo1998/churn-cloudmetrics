@@ -30,7 +30,7 @@ pio.templates["alegra"] = go.layout.Template(
         title=dict(font=dict(size=15, color=NAVY), x=0.0, xanchor="left", pad=dict(b=8)),
         xaxis=dict(showgrid=False, zeroline=False, linecolor="#e6eaee",
                    ticks="outside", tickcolor="#e6eaee", title_font=dict(size=12, color="#7b8794")),
-        yaxis=dict(showgrid=True, gridcolor="#eef1f4", zeroline=False,
+        yaxis=dict(showgrid=False, zeroline=False,
                    title_font=dict(size=12, color="#7b8794")),
         legend=dict(bgcolor="rgba(0,0,0,0)", title="", font=dict(size=12)),
         margin=dict(t=48, b=24, l=12, r=12),
@@ -294,7 +294,7 @@ bajas_con_ficha = (d["churn_retiro"].sum() / churned) if churned else 0
 
 st.markdown("---")
 
-nombres_tabs = ["Resumen", "Mapa", "Negocio", "Causa raiz", "Retiros", "Soporte", "Calidad de datos"]
+nombres_tabs = ["General", "Churn", "Negocio", "Causa raiz", "Soporte", "Calidad de datos"]
 tabs = st.tabs(nombres_tabs)
 T = dict(zip(nombres_tabs, tabs))
 
@@ -305,8 +305,8 @@ def churn_por(data, col):
     return g.sort_values("tasa", ascending=False)
 
 
-# ---------------- Resumen ----------------
-with T["Resumen"]:
+# ---------------- General ----------------
+with T["General"]:
     act = d[d.estado_cuenta == "activo"]
 
     # ---- Diagnostico automatico de la base activa (reglas) ----
@@ -449,8 +449,9 @@ with T["Resumen"]:
 
 
 
-# ---------------- Mapa ----------------
-with T["Mapa"]:
+# ---------------- Churn ----------------
+with T["Churn"]:
+    # --- Mapa de churn por pais ---
     st.subheader("Cuentas y churn por pais")
     st.caption("Tamano del circulo = cantidad de cuentas. Color = tasa de churn (mas rojo, mas churn).")
     g = d.groupby("pais").agg(cuentas=("user_id", "count"), churn=(col_churn, "sum"), mrr=("mrr", "sum")).reset_index()
@@ -463,12 +464,146 @@ with T["Mapa"]:
                          color_continuous_scale=ESCALA_CHURN, size_max=55, template=TPL)
     fig.update_geos(fitbounds="locations", showcountries=True, countrycolor="#cccccc", showland=True,
                     landcolor="#f7f7f7", showocean=True, oceancolor="#eaf2f8")
-    fig.update_layout(height=500, margin=dict(t=10, b=10), coloraxis_colorbar_title="churn")
+    fig.update_layout(height=460, margin=dict(t=10, b=10), coloraxis_colorbar_title="churn")
     st.plotly_chart(fig, use_container_width=True)
     g2 = g[["pais", "cuentas", "churn", "tasa", "mrr"]].sort_values("tasa", ascending=False).copy()
     g2["tasa"] = g2["tasa"].map("{:.1%}".format); g2["mrr"] = g2["mrr"].map("${:,.0f}".format)
     g2.columns = ["Pais", "Cuentas", "Churn", "Tasa churn", "MRR"]
     st.dataframe(g2, hide_index=True, use_container_width=True)
+
+    # --- Donde se concentra el churn ---
+    st.markdown("---")
+    st.subheader("Donde se concentra el churn")
+    st.caption("Que parte del churn aporta cada grupo y donde la tasa es mas alta. El reparto es bastante parejo: el perfil del cliente no es lo que dispara la baja.")
+    cseg = st.columns([1, 2, 1])
+    with cseg[1]:
+        g = d[d[col_churn]]["segmento"].value_counts().reset_index()
+        g.columns = ["segmento", "cuentas"]
+        fig = px.pie(g, names="segmento", values="cuentas", template=TPL, hole=0.55,
+                     color_discrete_sequence=[CORAL, AMBAR])
+        fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=14))
+        fig.update_layout(title="Reparto del churn por segmento", height=320, margin=dict(t=46, b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    cols = st.columns(2)
+    for col, titulo, cont in [("plan", "Tasa de churn por plan", cols[0]), ("pais", "Tasa de churn por pais", cols[1])]:
+        with cont:
+            g = churn_por(d, col)
+            tope = g["tasa"].max() * 1.18 if len(g) else 1
+            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False,
+                              yaxis_title="", xaxis_title="", yaxis=dict(range=[0, tope], automargin=True))
+            st.plotly_chart(fig, use_container_width=True)
+
+    # --- Retiros totales (todas las cuentas no activas) ---
+    st.markdown("---")
+    st.subheader("Retiros totales")
+    st.caption("Todas las cuentas que hoy no estan activas, dejen o no una ficha de retiro. Es el churn completo medido por estado de cuenta.")
+    no_act = d[d.estado_cuenta != "activo"]
+    n_no = len(no_act)
+    con_ficha = int(no_act["churn_retiro"].sum())
+    mt = st.columns(3)
+    mt[0].metric("Cuentas en churn", f"{n_no:,}", f"{(n_no/len(d) if len(d) else 0):.0%} de la base", delta_color="off",
+                 help="Cuentas en estado distinto de activo dentro del filtro.")
+    mt[1].metric("MRR perdido / mes", f"${no_act.mrr.sum():,.0f}", delta_color="off",
+                 help="Ingreso recurrente mensual de las cuentas que ya no estan activas.")
+    mt[2].metric("Con ficha de retiro", f"{con_ficha:,}", f"{(con_ficha/n_no if n_no else 0):.0%} del churn", delta_color="off",
+                 help="Cuantas de esas bajas dejaron un registro formal con el motivo. El resto se va sin dejar rastro.")
+    cc1, cc2 = st.columns(2)
+    cmap_estado = {"suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}
+    with cc1:
+        st.caption("Cuentas en churn por estado")
+        g = no_act.estado_cuenta.value_counts().reset_index(); g.columns = ["estado", "cuentas"]
+        g = g.sort_values("cuentas", ascending=True)
+        tope = g["cuentas"].max() * 1.18 if len(g) else 1
+        fig = px.bar(g, x="cuentas", y="estado", orientation="h", template=TPL, text="cuentas",
+                     color="estado", color_discrete_map=cmap_estado)
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        fig.update_layout(height=280, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="cuentas",
+                          xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
+        st.plotly_chart(fig, use_container_width=True)
+    with cc2:
+        st.caption("MRR perdido por estado")
+        g = no_act.groupby("estado_cuenta")["mrr"].sum().reset_index(); g.columns = ["estado", "mrr"]
+        g = g.sort_values("mrr", ascending=True)
+        tope = g["mrr"].max() * 1.28 if len(g) else 1
+        fig = px.bar(g, x="mrr", y="estado", orientation="h", template=TPL, text=g["mrr"].map("${:,.0f}".format),
+                     color="estado", color_discrete_map=cmap_estado)
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        fig.update_layout(height=280, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="MRR USD",
+                          xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
+        st.plotly_chart(fig, use_container_width=True)
+    st.info(f"Cada estado pide una accion distinta: suspendido es cobranza, inactivo es reactivacion (mas recuperable) "
+            f"y cancelado es win-back. Solo {con_ficha} de las {n_no} bajas dejaron ficha con motivo declarado: el resto "
+            f"se va sin registro, una brecha de medicion que conviene cerrar.")
+
+    # --- Retiros identificados (las que dejaron ficha) ---
+    st.markdown("---")
+    st.subheader("Retiros identificados")
+    st.caption("Las cuentas con ficha de retiro. Es la unica fuente con el motivo declarado, pero cubre solo una parte del churn.")
+    ret = d[d["churn_retiro"]].copy()
+    if len(ret) == 0:
+        st.info("No hay registros de retiro dentro del filtro actual.")
+    else:
+        voluntario = ret["tipo_retiro"].fillna("").str.lower().eq("voluntario").mean()
+        nps_med = ret["nps_salida"].mean()
+        m = st.columns(3)
+        m[0].metric("Fichas de retiro", f"{len(ret):,}", delta_color="off",
+                    help="Cuentas con registro formal de baja dentro del filtro.")
+        m[1].metric("Bajas voluntarias", f"{voluntario:.0%}", delta_color="off",
+                    help="Voluntario = el cliente decide irse. Involuntario suele ser corte por falta de pago.")
+        m[2].metric("NPS de salida", f"{nps_med:.1f}" if pd.notna(nps_med) else "s/d", delta_color="off",
+                    help="Promedio del NPS al momento de la baja. La mitad de las fichas lo tienen vacio y la escala es 1 a 6.")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("Motivo principal de baja")
+            g = ret["motivo_principal"].dropna().value_counts().reset_index()
+            g.columns = ["motivo", "casos"]; g = g.sort_values("casos", ascending=True)
+            tope = g["casos"].max() * 1.18 if len(g) else 1
+            fig = px.bar(g, x="casos", y="motivo", orientation="h", template=TPL, text="casos", color_discrete_sequence=[CORAL])
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            fig.update_layout(height=360, yaxis_title="", xaxis_title="casos", xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            st.caption("Voluntario vs involuntario")
+            g = ret["tipo_retiro"].fillna("sin dato").str.capitalize().value_counts().reset_index()
+            g.columns = ["tipo", "casos"]
+            fig = px.pie(g, names="tipo", values="casos", template=TPL, hole=0.5,
+                         color="tipo", color_discrete_map={"Voluntario": CORAL, "Involuntario": AMBAR, "Sin dato": GRIS})
+            fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13))
+            fig.update_layout(height=360, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("Involuntario suele ser corte por falta de pago: recuperable con gestion de cobro. Voluntario es problema de valor.")
+        c3, c4 = st.columns(2)
+        with c3:
+            st.caption("Con que producto lo reemplazan")
+            g = ret["lo_reemplaza_con"].dropna()
+            g = g[~g.str.lower().isin(["", "ninguno", "nada", "n/a"])].value_counts().reset_index()
+            g.columns = ["producto", "casos"]; g = g.sort_values("casos", ascending=True)
+            if len(g):
+                tope = g["casos"].max() * 1.18
+                fig = px.bar(g, x="casos", y="producto", orientation="h", template=TPL, text="casos", color_discrete_sequence=[TEAL_OSCURO])
+                fig.update_traces(textposition="outside", cliponaxis=False)
+                fig.update_layout(height=320, yaxis_title="", xaxis_title="casos", xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Sin datos de reemplazo en el filtro.")
+        with c4:
+            st.caption("NPS al momento de la salida")
+            g = ret["nps_salida"].dropna()
+            if len(g):
+                gg = g.value_counts().sort_index().reset_index()
+                gg.columns = ["nps", "casos"]
+                fig = px.bar(gg, x="nps", y="casos", template=TPL, text="casos",
+                             color="nps", color_continuous_scale=[CORAL, AMBAR, TEAL])
+                fig.update_traces(textposition="outside", cliponaxis=False)
+                fig.update_layout(height=320, yaxis_title="cuentas", xaxis_title="NPS de salida", coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Sin NPS de salida en el filtro.")
+        st.info("La ficha de retiro es rica pero parcial. Cerrar esa brecha, que toda baja deje motivo registrado, "
+                "es una mejora de proceso concreta ademas de la solucion con IA.")
+
 
 
 # ---------------- Negocio ----------------
@@ -501,44 +636,17 @@ with T["Negocio"]:
 
 
 
-    # ---- (movido desde Resumen) Concentracion del churn ----
-    st.markdown("---")
-    st.subheader("Donde se concentra el churn")
-    cseg = st.columns([1, 2, 1])
-    with cseg[1]:
-        g = d[d[col_churn]]["segmento"].value_counts().reset_index()
-        g.columns = ["segmento", "cuentas"]
-        fig = px.pie(g, names="segmento", values="cuentas", template=TPL, hole=0.55,
-                     color_discrete_sequence=[CORAL, AMBAR])
-        fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=14))
-        fig.update_layout(title="Reparto del churn por segmento", height=320, margin=dict(t=46, b=10), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    cols = st.columns(2)
-    for col, titulo, cont in [("plan", "Tasa de churn por plan", cols[0]), ("pais", "Tasa de churn por pais", cols[1])]:
-        with cont:
-            g = churn_por(d, col)
-            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
-            fig.update_traces(textposition="outside", cliponaxis=False)
-            fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False,
-                              yaxis_title="", xaxis_title="", xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("##### Composicion de la base por estado")
-    g = d.estado_cuenta.value_counts().reset_index(); g.columns = ["estado", "cuentas"]
-    fig = px.bar(g, x="cuentas", y="estado", orientation="h", template=TPL, color="estado",
-                 color_discrete_map={"activo": TEAL, "suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}, text="cuentas")
-    fig.update_traces(textposition="outside", cliponaxis=False)
-    fig.update_layout(height=250, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="cuentas",
-                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
 # ---------------- Causa raiz ----------------
 with T["Causa raiz"]:
     st.subheader("La activacion temprana es la causa raiz")
-    st.caption("El churn no se explica por quien es el cliente sino por como arranca. Cinco senales de configuracion inicial son las que mas lo separan.")
+    st.markdown(
+        "El churn de CloudMetrics no se explica por quien es el cliente, sino por como arranca. "
+        "Una cuenta que completa su configuracion inicial casi no se va; una que no logra activarse se va casi siempre. "
+        "Lo que sigue muestra, con los datos, por que la activacion es la causa raiz, que la distingue de un simple "
+        "sintoma, y por que el perfil del cliente casi no importa.")
 
     # --- Escalera del indice de activacion (hero) ---
+    st.markdown("##### El indice de activacion: a peor arranque, mas churn")
     esc = d.groupby("fallas_activacion").agg(cuentas=("user_id", "count"), churn=(col_churn, "mean")).reset_index()
     esc = esc.sort_values("fallas_activacion")
     esc["etq"] = esc["fallas_activacion"].astype(int).astype(str)
@@ -550,15 +658,18 @@ with T["Causa raiz"]:
                        height=400, yaxis_tickformat=".0%", coloraxis_showscale=False,
                        yaxis_title="tasa de churn", xaxis_title="senales que fallan", margin=dict(t=48, b=10))
     st.plotly_chart(figE, use_container_width=True)
-    st.caption("Las cinco senales: configuracion de empresa, primera factura, plan de cuentas, empleados cargados y modulo CxC. A mas fallas, mas churn, de forma escalonada. Esa escalera es la prueba de que la activacion es un motor del churn y no una coincidencia.")
+    st.caption("Las cinco senales son pasos del arranque: configurar la empresa, emitir la primera factura, cargar el plan "
+               "de cuentas, cargar empleados y activar el modulo de cuentas por cobrar. La relacion es escalonada y monotona: "
+               "cada paso que queda sin hacer sube el churn. Ese patron dosis-respuesta es la firma de una causa, no de una casualidad.")
 
-    st.markdown("##### Cada senal por separado")
-    señales5 = [("configuracion_empresa_completa", "Configuracion de empresa"),
+    # --- Cada senal por separado ---
+    st.markdown("##### Cada senal aporta por su cuenta")
+    senales5 = [("configuracion_empresa_completa", "Configuracion de empresa"),
                 ("plan_cuentas_configurado", "Plan de cuentas"),
                 ("empleados_cargados", "Empleados cargados"),
                 ("modulo_cxc_activo", "Modulo CxC")]
     filas = []
-    for col, lbl in señales5:
+    for col, lbl in senales5:
         if col in d.columns:
             falla = ~d[col].fillna("").str.lower().eq("si")
             filas.append({"senal": lbl, "churn_falla": d[falla][col_churn].mean(), "churn_ok": d[~falla][col_churn].mean()})
@@ -572,13 +683,51 @@ with T["Causa raiz"]:
                   color_discrete_map={"Si falla": CORAL, "Si esta ok": TEAL})
     figS.update_traces(textposition="outside", cliponaxis=False)
     figS.update_layout(height=340, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
-                       yaxis_title="", xaxis_title="tasa de churn", legend_title="")
+                       yaxis_title="", xaxis_title="tasa de churn", legend_title="", xaxis=dict(range=[0, 1]))
     st.plotly_chart(figS, use_container_width=True)
-    st.caption("Se excluyen del indice el banco conectado (efecto debil) y los modulos de nicho. Tambien login y sesiones, que dan 100% de churn pero por estar pegados al resultado son sintoma, no causa.")
+    st.caption("Cada una de las cinco senales, por separado, multiplica el churn cuando falla. Se excluyen del indice el banco "
+               "conectado (efecto debil) y los modulos de nicho como nomina o inventario (sirven a pocas cuentas).")
 
+    # --- El perfil no mueve la aguja ---
+    st.markdown("##### Lo que NO explica el churn: el perfil del cliente")
+    st.caption("Cuanto separa cada factor el churn, medido como la diferencia entre su grupo de mayor y menor churn. "
+               "La activacion abre un abismo; el segmento, el plan y el pais apenas se mueven alrededor del promedio.")
+    factores = []
+    ea = d.groupby("fallas_activacion")[col_churn].mean()
+    if len(ea):
+        factores.append(("Activacion (0 a 5 fallas)", ea.min(), ea.max()))
+    for col, lbl in [("pais", "Pais"), ("plan", "Plan"), ("segmento", "Segmento")]:
+        if col in d.columns:
+            gg = d.groupby(col)[col_churn].mean()
+            if len(gg):
+                factores.append((lbl, gg.min(), gg.max()))
+    fr = pd.DataFrame([{"factor": f, "spread": hi - lo, "lo": lo, "hi": hi} for f, lo, hi in factores]).sort_values("spread")
+    tope = fr["spread"].max() * 1.35 if len(fr) else 1
+    figR = px.bar(fr, x="spread", y="factor", orientation="h", template=TPL,
+                  text=fr.apply(lambda r: f"{r.lo:.0%} a {r.hi:.0%}", axis=1),
+                  color="spread", color_continuous_scale=[GRIS, AMBAR, CORAL])
+    figR.update_traces(textposition="outside", cliponaxis=False)
+    figR.update_layout(height=300, coloraxis_showscale=False, xaxis_tickformat=".0%",
+                       yaxis_title="", xaxis_title="cuanto separa el churn (mayor menos menor)",
+                       margin=dict(t=10, b=10), xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
+    st.plotly_chart(figR, use_container_width=True)
+    st.caption("Por eso el indice se construye sobre como arranca la cuenta y no sobre quien es. Atacar la activacion sirve "
+               "para toda la base; segmentar por perfil no llevaria a ningun lado.")
+
+    # --- Sintoma vs causa ---
+    st.markdown("##### Sintoma o causa: por que no usamos el login ni las sesiones")
+    st.markdown(
+        "Hay senales que predicen el churn casi a la perfeccion: una cuenta sin login en los ultimos 30 dias o con menos "
+        "de una sesion por semana se va practicamente siempre. Pero esas senales son un **sintoma**, no una causa: ocurren "
+        "al final, pegadas a la baja, cuando el cliente ya se desconecto. Avisan demasiado tarde para actuar. "
+        "La activacion, en cambio, ocurre en las primeras semanas, antes de que el cliente se vaya, y es algo sobre lo que "
+        "el equipo puede intervenir. Por eso el indice se queda con las senales de arranque: llegan a tiempo y son accionables.")
+
+    # --- Friccion de soporte ---
     if HAY_SOPORTE:
-        st.markdown("##### Friccion de soporte: el segundo driver y alerta temprana")
-        st.caption("No es el volumen de soporte lo que predice el churn, sino que el soporte falle.")
+        st.markdown("##### El segundo driver: que el soporte falle")
+        st.caption("No es el volumen de soporte lo que predice el churn, sino que el soporte falle. Un ticket reabierto o "
+                   "sin resolver es una alerta temprana que aparece antes de la baja.")
         posibles = [("Ticket reabierto", "chat_reaperturas"), ("Ticket sin resolver", "chat_no_resueltos"),
                     ("Escalo a especialista", "tel_escalo"), ("Sentimiento negativo", "wa_negativos")]
         senales = []
@@ -595,131 +744,84 @@ with T["Causa raiz"]:
             fig.update_layout(height=340, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
             st.plotly_chart(fig, use_container_width=True)
 
-    st.info("La activacion incompleta es la causa raiz dominante: una cuenta que arranca completa churnea cerca del 2%, una que no activa nada cerca del 93%. La friccion de soporte es el segundo driver y funciona como alerta temprana. El perfil del cliente (segmento, pais, plan) casi no mueve la aguja.")
+    st.info("En resumen: la activacion incompleta es la causa raiz dominante. Una cuenta que arranca completa churnea cerca "
+            "del 2% y una que no activa nada cerca del 93%. La friccion de soporte es el segundo driver y sirve de alerta "
+            "temprana. El perfil del cliente (segmento, plan, pais) casi no mueve la aguja, y las senales de uso como el login "
+            "son sintomas que avisan tarde. La palanca esta en el arranque.")
 
-
-# ---------------- Retiros ----------------
-with T["Retiros"]:
-    st.subheader("Que dicen los que se van")
-    st.caption("Analisis de las cuentas con ficha de retiro. Es la unica fuente con el motivo declarado, "
-               "pero cubre solo una parte del churn: el resto se va sin dejar registro.")
-    ret = d[d["churn_retiro"]].copy()
-    if len(ret) == 0:
-        st.info("No hay registros de retiro dentro del filtro actual.")
-    else:
-        cobertura = len(ret) / churned if churned else 0
-        voluntario = ret["tipo_retiro"].fillna("").str.lower().eq("voluntario").mean()
-        nps_med = ret["nps_salida"].mean()
-        reemplaza = ret["lo_reemplaza_con"].notna().mean()
-        m = st.columns(4)
-        m[0].metric("Fichas de retiro", f"{len(ret):,}",
-                    help="Cuentas con registro formal de baja dentro del filtro.")
-        m[1].metric("Cubre del churn", f"{cobertura:.0%}",
-                    help="Que parte del churn total tiene ficha. El resto se va sin registrar el motivo.")
-        m[2].metric("Bajas voluntarias", f"{voluntario:.0%}",
-                    help="Voluntario = el cliente decide irse. Involuntario suele ser corte por falta de pago.")
-        m[3].metric("NPS de salida", f"{nps_med:.1f}" if pd.notna(nps_med) else "s/d",
-                    help="Promedio del NPS al momento de la baja. Ojo: la mitad de las fichas lo tienen vacio y la escala es 1 a 6.")
-
-        st.markdown("---")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.caption("Motivo principal de baja")
-            g = ret["motivo_principal"].dropna().value_counts().reset_index()
-            g.columns = ["motivo", "casos"]; g = g.sort_values("casos", ascending=True)
-            fig = px.bar(g, x="casos", y="motivo", orientation="h", template=TPL,
-                         text="casos", color_discrete_sequence=[CORAL])
-            estilo_barras(fig)
-            fig.update_layout(height=360, yaxis_title="", xaxis_title="casos")
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            st.caption("Voluntario vs involuntario")
-            g = ret["tipo_retiro"].fillna("sin dato").str.capitalize().value_counts().reset_index()
-            g.columns = ["tipo", "casos"]
-            fig = px.pie(g, names="tipo", values="casos", template=TPL, hole=0.5,
-                         color="tipo", color_discrete_map={"Voluntario": CORAL, "Involuntario": AMBAR, "Sin dato": GRIS})
-            fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13))
-            fig.update_layout(height=360, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("Involuntario suele ser corte por falta de pago: recuperable con gestion de cobro. Voluntario es problema de valor.")
-
-        c3, c4 = st.columns(2)
-        with c3:
-            st.caption("Con que producto lo reemplazan")
-            g = ret["lo_reemplaza_con"].dropna()
-            g = g[~g.str.lower().isin(["", "ninguno", "nada", "n/a"])].value_counts().reset_index()
-            g.columns = ["producto", "casos"]; g = g.sort_values("casos", ascending=True)
-            if len(g):
-                fig = px.bar(g, x="casos", y="producto", orientation="h", template=TPL,
-                             text="casos", color_discrete_sequence=[TEAL_OSCURO])
-                estilo_barras(fig)
-                fig.update_layout(height=320, yaxis_title="", xaxis_title="casos")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Sin datos de reemplazo en el filtro.")
-        with c4:
-            st.caption("NPS al momento de la salida")
-            g = ret["nps_salida"].dropna()
-            if len(g):
-                gg = g.value_counts().sort_index().reset_index()
-                gg.columns = ["nps", "casos"]
-                fig = px.bar(gg, x="nps", y="casos", template=TPL, text="casos",
-                             color="nps", color_continuous_scale=[CORAL, AMBAR, TEAL])
-                estilo_barras(fig)
-                fig.update_layout(height=320, yaxis_title="cuentas", xaxis_title="NPS de salida", coloraxis_showscale=False)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Sin NPS de salida en el filtro.")
-        st.info("La ficha de retiro es rica pero parcial: solo cubre una fraccion del churn. Cerrar esa brecha "
-                "(que toda baja deje motivo registrado) es una mejora de proceso concreta, ademas de la solucion con IA.")
 
 
 # ---------------- Soporte ----------------
 with T["Soporte"]:
-    with st.expander("Diagnostico de archivos detectados"):
-        st.write("CSV encontrados en el repo y como los clasifico la app:")
-        st.dataframe(pd.DataFrame(DETALLE, columns=["archivo", "clasificado como"]), hide_index=True, use_container_width=True)
     if not HAY_SOPORTE:
-        st.warning("No se detectaron archivos de soporte. Revisa el diagnostico de arriba: cada archivo de soporte debe conservar sus columnas originales (csat_score para chat, sentimiento_usuario para whatsapp, nps_post_llamada para telefono).")
+        st.warning("No se detectaron archivos de soporte en el repo. Para ver esta seccion, suba los CSV de chat, "
+                   "whatsapp y telefono conservando sus columnas originales (csat_score, sentimiento_usuario, nps_post_llamada).")
     else:
+        # --- Cobertura de soporte sobre la base (primero) ---
+        st.subheader("Cobertura de soporte sobre la base")
+        st.caption("Cuanto del churn pasa por soporte y, sobre todo, si el soporte funciono. La friccion (ticket reabierto, "
+                   "sin resolver, escalado o con sentimiento negativo) es lo que se asocia al churn, no el volumen.")
+        cov = st.columns(4)
+        cov[0].metric("Cuentas con algun ticket", f"{int(d['usa_soporte'].sum()):,}", f"{d['usa_soporte'].mean():.0%} de la base", delta_color="off")
+        cov[1].metric("Tickets totales", f"{int(d['tickets_total'].sum()):,}", delta_color="off")
+        cov[2].metric("Cuentas con friccion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%} de la base", delta_color="off")
+        churn_fric = d[d['friccion']][col_churn].mean() if d['friccion'].any() else 0
+        churn_sin = d[~d['friccion']][col_churn].mean() if (~d['friccion']).any() else 0
+        cov[3].metric("Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", delta_color="off",
+                      help="Tasa de churn de las cuentas que tuvieron alguna mala experiencia de soporte frente a las que no.")
+
+        st.markdown("---")
         st.subheader("Analisis por canal de soporte")
         canal = st.selectbox("Elegi el canal", ["Chat", "WhatsApp", "Telefono"])
+        cmap = d.set_index("user_id")[col_churn]
 
         if canal == "Chat" and chat is not None:
-            c = chat
+            c = chat.copy(); c["_churn"] = c["user_id"].map(cmap)
             m = st.columns(4)
             m[0].metric("Tickets", f"{len(c):,}")
             m[1].metric("Tasa de resolucion", f"{(c.resuelto=='si').mean():.0%}")
             m[2].metric("Tasa de reapertura", f"{(c.reapertura=='si').mean():.0%}")
             m[3].metric("CSAT promedio", f"{c.csat_score.mean():.2f} / 5")
+            m2 = st.columns(3)
+            m2[0].metric("Cuentas atendidas", f"{c['user_id'].nunique():,}")
+            m2[1].metric("Tickets por cuenta", f"{len(c)/c['user_id'].nunique():.1f}")
+            m2[2].metric("CSAT activas vs churn", f"{c[c._churn==False].csat_score.mean():.2f} vs {c[c._churn==True].csat_score.mean():.2f}",
+                         help="CSAT promedio de tickets de cuentas hoy activas frente a las que ya churnearon.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Tickets por tema")
                 g = c.tema_principal.value_counts().reset_index(); g.columns = ["tema", "tickets"]
                 fig = px.bar(g, x="tickets", y="tema", orientation="h", template=TPL, text="tickets", color_discrete_sequence=[AZUL])
                 estilo_barras(fig)
-                fig.update_layout(height=340, yaxis_title="", yaxis={"categoryorder": "total ascending"})
+                fig.update_layout(height=340, yaxis_title="", yaxis={"categoryorder": "total ascending", "automargin": True})
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
-                st.caption("CSAT promedio por tema (mas bajo = mas fricion)")
+                st.caption("CSAT promedio por tema (mas bajo = mas friccion)")
                 g = c.groupby("tema_principal").csat_score.mean().reset_index().sort_values("csat_score")
                 fig = px.bar(g, x="csat_score", y="tema_principal", orientation="h", template=TPL, color="csat_score",
                              text=g["csat_score"].map("{:.1f}".format),
                              color_continuous_scale=[CORAL, AMBAR, TEAL], range_x=[1, 5])
                 fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color=NAVY))
-                fig.update_layout(height=340, yaxis_title="", coloraxis_showscale=False)
+                fig.update_layout(height=340, yaxis_title="", coloraxis_showscale=False, yaxis=dict(automargin=True))
                 st.plotly_chart(fig, use_container_width=True)
             t1, t2 = st.columns(2)
             t1.metric("Primera respuesta (mediana)", f"{c.tiempo_primera_respuesta_min.median():.0f} min")
             t2.metric("Tiempo de resolucion (mediana)", f"{c.tiempo_resolucion_hs.median():.1f} hs")
 
         elif canal == "WhatsApp" and wa is not None:
-            c = wa
+            c = wa.copy(); c["_churn"] = c["user_id"].map(cmap)
             m = st.columns(4)
             m[0].metric("Tickets", f"{len(c):,}")
             m[1].metric("Resuelto en conversacion", f"{(c.resuelto_en_conversacion=='si').mean():.0%}")
             m[2].metric("Deriva a agente", f"{(c.deriva_a_agente=='si').mean():.0%}")
             m[3].metric("Sentimiento negativo", f"{(c.sentimiento_usuario=='negativo').mean():.0%}")
+            m2 = st.columns(3)
+            m2[0].metric("Cuentas atendidas", f"{c['user_id'].nunique():,}")
+            m2[1].metric("Tickets por cuenta", f"{len(c)/c['user_id'].nunique():.1f}")
+            neg_act = (c[c._churn==False].sentimiento_usuario=='negativo').mean()
+            neg_chu = (c[c._churn==True].sentimiento_usuario=='negativo').mean()
+            m2[2].metric("Negativo activas vs churn", f"{neg_act:.0%} vs {neg_chu:.0%}",
+                         help="Porcentaje de tickets con sentimiento negativo, en cuentas activas frente a las que churnearon.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Sentimiento del usuario")
@@ -733,41 +835,43 @@ with T["Soporte"]:
                 st.caption("Sentimiento negativo por tema")
                 g = c.groupby("tema_principal").apply(lambda x: (x.sentimiento_usuario == "negativo").mean()).reset_index()
                 g.columns = ["tema", "neg"]; g = g.sort_values("neg", ascending=True)
+                tope = g["neg"].max() * 1.18 if len(g) else 1
                 fig = px.bar(g, x="neg", y="tema", orientation="h", template=TPL, text=g["neg"].map("{:.0%}".format), color_discrete_sequence=[ROJO])
-                fig.update_layout(height=330, margin=dict(t=10, b=10), yaxis_title="", xaxis_tickformat=".0%")
+                fig.update_traces(textposition="outside", cliponaxis=False)
+                fig.update_layout(height=330, margin=dict(t=10, b=10), yaxis_title="", xaxis_tickformat=".0%",
+                                  xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
                 st.plotly_chart(fig, use_container_width=True)
             st.metric("Primera respuesta (mediana)", f"{c.tiempo_primera_respuesta_min.median():.0f} min")
 
         elif canal == "Telefono" and tel is not None:
-            c = tel
+            c = tel.copy(); c["_churn"] = c["user_id"].map(cmap)
             m = st.columns(4)
             m[0].metric("Llamadas", f"{len(c):,}")
             m[1].metric("Tasa de resolucion", f"{(c.resuelto=='si').mean():.0%}")
             m[2].metric("Tasa de escalamiento", f"{(c.escalo_a_especialista=='si').mean():.0%}")
             m[3].metric("NPS post llamada", f"{c.nps_post_llamada.mean():.2f} / 5")
+            m2 = st.columns(3)
+            m2[0].metric("Cuentas atendidas", f"{c['user_id'].nunique():,}")
+            m2[1].metric("Llamadas por cuenta", f"{len(c)/c['user_id'].nunique():.1f}")
+            m2[2].metric("NPS activas vs churn", f"{c[c._churn==False].nps_post_llamada.mean():.2f} vs {c[c._churn==True].nps_post_llamada.mean():.2f}",
+                         help="NPS post llamada de cuentas activas frente a las que churnearon.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Llamadas por tema")
                 g = c.tema_principal.value_counts().reset_index(); g.columns = ["tema", "llamadas"]
                 fig = px.bar(g, x="llamadas", y="tema", orientation="h", template=TPL, text="llamadas", color_discrete_sequence=[AZUL])
                 estilo_barras(fig)
-                fig.update_layout(height=330, yaxis_title="", yaxis={"categoryorder": "total ascending"})
+                fig.update_layout(height=330, yaxis_title="", yaxis={"categoryorder": "total ascending", "automargin": True})
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
                 st.caption("Motivos de escalamiento")
                 g = c.motivo_escala.dropna().value_counts().reset_index(); g.columns = ["motivo", "casos"]
                 fig = px.bar(g, x="casos", y="motivo", orientation="h", template=TPL, text="casos", color_discrete_sequence=[NARANJA])
                 estilo_barras(fig)
-                fig.update_layout(height=330, yaxis_title="", yaxis={"categoryorder": "total ascending"})
+                fig.update_layout(height=330, yaxis_title="", yaxis={"categoryorder": "total ascending", "automargin": True})
                 st.plotly_chart(fig, use_container_width=True)
             st.metric("Duracion de llamada (mediana)", f"{c.duracion_llamada_min.median():.0f} min")
 
-        st.markdown("---")
-        st.markdown("##### Cobertura de soporte sobre la base")
-        cov = st.columns(3)
-        cov[0].metric("Cuentas con algun ticket", f"{int(d['usa_soporte'].sum()):,}", f"{d['usa_soporte'].mean():.0%}")
-        cov[1].metric("Cuentas con fricion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%}")
-        cov[2].metric("Churn con fricion vs sin", f"{d[d['friccion']][col_churn].mean():.0%} vs {d[~d['friccion']][col_churn].mean():.0%}")
 
 
 # ---------------- Calidad de datos ----------------
