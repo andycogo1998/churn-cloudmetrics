@@ -81,7 +81,7 @@ div[data-testid="stMetric"] > div {{justify-content: center; align-items: center
 def logo_cloudmetrics():
     # Logo inventado: nube + barras de metrica, en turquesa de marca. Compacto (sin saltos de linea).
     return (
-        f'<svg width="70" height="70" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
+        f'<svg width="140" height="140" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">'
         f'<path d="M20 42h24a11 11 0 0 0 1.5-21.9A15 15 0 0 0 17 24.5 10 10 0 0 0 20 42z" fill="{TEAL}" opacity="0.18"/>'
         f'<path d="M22 40h22a9 9 0 0 0 1-17.9A13 13 0 0 0 19 26 8 8 0 0 0 22 40z" fill="none" stroke="{TEAL}" stroke-width="2.4"/>'
         f'<rect x="25" y="31" width="3.4" height="7" rx="1.2" fill="{TEAL_OSCURO}"/>'
@@ -268,7 +268,7 @@ _header = (
     '<div style="text-align:center; margin-bottom:0.2rem;">'
     '<div style="display:flex; justify-content:center; align-items:center; gap:12px;">'
     f'{logo_cloudmetrics()}'
-    f'<h1 style="margin:0; color:{NAVY};">CloudMetrics · Centro de Control de Churn</h1>'
+    f'<h1 style="margin:0; color:{NAVY};">CloudMetrics - Centro de Control de Churn</h1>'
     '</div>'
     f'<p style="max-width:820px; margin:0.6rem auto 0; color:#5b6b7b; font-size:0.98rem;">{_motivo}</p>'
     '</div>'
@@ -285,32 +285,6 @@ tasa_activacion = d["activado"].mean() if total else 0
 revenue_churn = mrr_riesgo / mrr_total if mrr_total else 0
 bajas_con_ficha = (d["churn_retiro"].sum() / churned) if churned else 0
 
-# Titular: cuatro numeros simples, sin dos churn compitiendo
-k = st.columns(4)
-k[0].metric("Cuentas", f"{total:,}",
-            help="Cuentas que entran en el filtro actual.")
-k[1].metric("Churn", f"{tasa:.1%}", f"{churned:,} cuentas", delta_color="off",
-            help="Cuentas en estado distinto de activo sobre el total. Es la verdad operativa del churn.")
-k[2].metric("MRR activo", f"${mrr_activo:,.0f}",
-            help="Ingreso recurrente mensual de las cuentas activas, en USD.")
-k[3].metric("MRR en riesgo", f"${mrr_riesgo:,.0f}", f"{revenue_churn:.0%} del MRR", delta_color="off",
-            help="Ingreso recurrente mensual de las cuentas que ya churnearon. Es la perdida que estamos midiendo.")
-
-# Franja que empieza a explicar el porque detras de esos numeros
-st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-ins = st.columns(3)
-ins[0].markdown(
-    f"<div class='insight'><div class='n'>{tasa:.0%} cuentas · {revenue_churn:.0%} ingresos</div>"
-    f"<div class='t'>El churn de ingresos es menor al de cuentas: se van sobre todo cuentas chicas, "
-    f"pero igual hay ${mrr_riesgo:,.0f} de MRR en juego.</div></div>", unsafe_allow_html=True)
-ins[1].markdown(
-    f"<div class='insight warn'><div class='n'>1 de cada {(1/bajas_con_ficha if bajas_con_ficha else 0):.0f} bajas tiene ficha</div>"
-    f"<div class='t'>El churn real es {tasa:.0%} pero retiros solo registra {churn_teorico:.0%}. "
-    f"Medir por estado_cuenta evita subestimar el problema a la mitad.</div></div>", unsafe_allow_html=True)
-ins[2].markdown(
-    f"<div class='insight bad'><div class='n'>{tasa_activacion:.0%} llega a facturar</div>"
-    f"<div class='t'>Activacion incompleta es la causa raiz dominante. Quien no emite su primera "
-    f"factura churnea mucho mas. El detalle esta en Causa raiz.</div></div>", unsafe_allow_html=True)
 st.markdown("---")
 
 nombres_tabs = ["Resumen", "Mapa", "Negocio", "Causa raiz", "Retiros", "Soporte", "Calidad de datos"]
@@ -326,81 +300,86 @@ def churn_por(data, col):
 
 # ---------------- Resumen ----------------
 with T["Resumen"]:
+    act = d[d.estado_cuenta == "activo"]
+
+    # ---- Tarjetas por estado, cada una con su MRR ----
+    estados_cfg = [
+        ("Cuentas", None, "Cuentas que se encuentran en el filtro actual."),
+        ("Activas", "activo", "Cuentas que hoy siguen activas y pagando."),
+        ("Suspendidas", "suspendido", "Cuentas cortadas, normalmente por falta de pago. Recuperables con cobranza."),
+        ("Inactivas", "inactivo", "Cuentas que dejaron de tener actividad sin darse de baja formal."),
+        ("Canceladas", "cancelado", "Bajas definitivas de la cuenta."),
+    ]
+    kc = st.columns(5)
+    for (lbl, estado, ayuda), c in zip(estados_cfg, kc):
+        sub = d if estado is None else d[d.estado_cuenta == estado]
+        c.metric(lbl, f"{len(sub):,}", f"MRR ${sub.mrr.sum():,.0f}", delta_color="off", help=ayuda)
+
+    st.markdown("---")
+
     # ---- Cuentas activas hoy ----
     st.subheader("Cuentas activas hoy")
     st.caption("Como se compone la base que hoy sigue pagando. Util para entender quien es el cliente actual.")
-    act = d[d.estado_cuenta == "activo"]
-    cols = st.columns(4)
-    cortes = [("segmento", "Por segmento", cols[0]), ("plan", "Por plan", cols[1]),
-              ("pais", "Por pais", cols[2]), ("metodo_pago", "Por metodo de pago", cols[3])]
-    for col, titulo, cont in cortes:
+
+    cseg = st.columns([1, 2, 1])
+    with cseg[1]:
+        g = act["segmento"].value_counts().reset_index()
+        g.columns = ["segmento", "cuentas"]
+        fig = px.pie(g, names="segmento", values="cuentas", template=TPL, hole=0.55,
+                     color_discrete_sequence=[TEAL, NAVY])
+        fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=14))
+        fig.update_layout(title="Por segmento", height=330, margin=dict(t=46, b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    cols = st.columns(3)
+    for col, titulo, cont in [("plan", "Por plan", cols[0]), ("pais", "Por pais", cols[1]), ("metodo_pago", "Por metodo de pago", cols[2])]:
         with cont:
             g = act[col].value_counts().reset_index()
             g.columns = [col, "cuentas"]
             g = g.sort_values("cuentas", ascending=True)
             fig = px.bar(g, x="cuentas", y=col, orientation="h", template=TPL,
                          text="cuentas", color_discrete_sequence=[TEAL])
-            fig.update_traces(textposition="outside")
-            fig.update_layout(title=titulo, height=300, showlegend=False,
-                              margin=dict(t=40, b=10), yaxis_title="", xaxis_title="")
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            fig.update_layout(title=titulo, height=300, showlegend=False, margin=dict(t=40, b=10),
+                              yaxis_title="", xaxis_title="",
+                              xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
             st.plotly_chart(fig, use_container_width=True)
-    st.caption("Nota: el metodo de pago tiene inconsistencias geograficas documentadas (PSE y OXXO fuera de su pais). Tomar como referencia, no como dato confiable por pais.")
 
     st.markdown("---")
 
-    # ---- Registros en el tiempo ----
+    # ---- Salud de activacion de la base activa ----
+    st.subheader("Salud de activacion de la base activa")
+    st.caption("Cuantas senales de activacion tiene incompletas cada cuenta ACTIVA hoy. Funciona como alerta temprana: las activas con mas senales incompletas son las mas expuestas a churn.")
+    sa = act.copy()
+    sa["nivel"] = sa["fallas_activacion"].clip(upper=5)
+    g = sa.groupby("nivel").size().reset_index(name="cuentas")
+    g["etq"] = g["nivel"].astype(int).astype(str)
+    fig = px.bar(g, x="etq", y="cuentas", template=TPL, text="cuentas",
+                 color="nivel", color_continuous_scale=[TEAL, AMBAR, CORAL])
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_layout(height=300, coloraxis_showscale=False, margin=dict(t=10, b=10),
+                      yaxis_title="cuentas activas", xaxis_title="senales de activacion incompletas",
+                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+    st.plotly_chart(fig, use_container_width=True)
+    en_riesgo = int((sa["fallas_activacion"] >= 2).sum())
+    st.caption(f"{en_riesgo:,} cuentas activas tienen 2 o mas senales de activacion incompletas, el grupo donde el churn dispara. Son las candidatas naturales a una accion de retencion proactiva.")
+
+    st.markdown("---")
+
+    # ---- Cuentas registradas por mes ----
     st.markdown("##### Cuentas registradas por mes")
-    st.caption("Cuantas cuentas se sumaron cada mes, separando las que hoy siguen activas de las que ya churnearon. Muestra el crecimiento y como le fue a cada camada.")
+    st.caption("Cuantas cuentas se registraron cada mes, identificando las que hoy siguen activas de las que ya hicieron churn.")
     reg = d.dropna(subset=["fecha_registro"]).copy()
     reg["mes"] = reg["fecha_registro"].dt.to_period("M").dt.to_timestamp()
     reg["situacion"] = np.where(reg[col_churn], "Churn", "Activa")
     g = reg.groupby(["mes", "situacion"]).size().reset_index(name="cuentas")
+    tot_mes = g.groupby("mes")["cuentas"].transform("sum")
+    g["pct"] = g["cuentas"] / tot_mes
     fig = px.bar(g, x="mes", y="cuentas", color="situacion", template=TPL, barmode="stack",
-                 color_discrete_map={"Activa": TEAL, "Churn": CORAL})
-    fig.update_layout(height=340, xaxis_title="", yaxis_title="cuentas",
+                 text=g["pct"].map("{:.0%}".format), color_discrete_map={"Activa": TEAL, "Churn": CORAL})
+    fig.update_traces(textposition="inside", textfont=dict(color="white", size=11), insidetextanchor="middle")
+    fig.update_layout(height=360, xaxis_title="mes de registro", yaxis_title="cuentas",
                       legend=dict(orientation="h", y=1.1, x=0))
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("---")
-
-    # ---- Churn por antiguedad (cohorte) ----
-    st.markdown("##### Churn segun antiguedad de la cuenta")
-    st.caption("Agrupa las cuentas por meses desde el registro, medidos hasta la ultima fecha observada en los datos. "
-               "Si el churn se concentra en las cuentas jovenes, el problema es de arranque (onboarding), no de desgaste.")
-    ant = d.dropna(subset=["fecha_registro"]).copy()
-    fechas_ref = pd.concat([df["fecha_registro"], df["fecha_ultimo_pago"], df.get("fecha_retiro", pd.Series(dtype="datetime64[ns]"))])
-    REF = fechas_ref.max()
-    meses_ant = (REF - ant["fecha_registro"]).dt.days / 30.0
-    bins = [0, 3, 6, 12, 18, 999]
-    etiquetas = ["0-3 m", "3-6 m", "6-12 m", "12-18 m", "18+ m"]
-    ant["antiguedad"] = pd.cut(meses_ant, bins=bins, labels=etiquetas, right=False)
-    g = ant.groupby("antiguedad", observed=True).agg(cuentas=("user_id", "count"), churn=(col_churn, "mean")).reset_index()
-    fig = px.bar(g, x="antiguedad", y="churn", template=TPL, text=g["churn"].map("{:.0%}".format),
-                 color_discrete_sequence=[TEAL_OSCURO], custom_data=["cuentas"])
-    fig.update_traces(textposition="outside", cliponaxis=False,
-                      hovertemplate="%{x}<br>Churn: %{y:.1%}<br>Cuentas: %{customdata[0]}<extra></extra>")
-    fig.update_layout(height=320, yaxis_tickformat=".0%", yaxis_title="tasa de churn", xaxis_title="meses desde el registro")
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"Antiguedad calculada hasta {REF:%b %Y}, la fecha mas reciente en los datos. Las cohortes jovenes tienen menos tiempo expuesto, tenerlo en cuenta al comparar.")
-
-    st.markdown("---")
-
-    # ---- Donde se concentra el churn ----
-    st.subheader("Donde se concentra el churn")
-    st.caption("Tasa de churn por corte. Barra mas alta = grupo que mas se va.")
-    cols = st.columns(3)
-    for col, titulo, cont in [("segmento", "Por segmento", cols[0]), ("plan", "Por plan", cols[1]), ("pais", "Por pais", cols[2])]:
-        with cont:
-            g = churn_por(d, col)
-            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
-            fig.update_traces(textposition="outside")
-            fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False, yaxis_title="", xaxis_title="")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown("##### Composicion de la base por estado")
-    g = d.estado_cuenta.value_counts().reset_index(); g.columns = ["estado", "cuentas"]
-    fig = px.bar(g, x="cuentas", y="estado", orientation="h", template=TPL, color="estado",
-                 color_discrete_map={"activo": TEAL, "suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}, text="cuentas")
-    fig.update_layout(height=250, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="cuentas")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -453,6 +432,39 @@ with T["Negocio"]:
         fig = px.funnel(pd.DataFrame(filas), x="cuentas", y="hito", template=TPL, color_discrete_sequence=[VERDE])
         fig.update_layout(height=320, margin=dict(t=10, b=10), yaxis_title="")
         st.plotly_chart(fig, use_container_width=True)
+
+
+
+    # ---- (movido desde Resumen) Concentracion del churn ----
+    st.markdown("---")
+    st.subheader("Donde se concentra el churn")
+    cseg = st.columns([1, 2, 1])
+    with cseg[1]:
+        g = d[d[col_churn]]["segmento"].value_counts().reset_index()
+        g.columns = ["segmento", "cuentas"]
+        fig = px.pie(g, names="segmento", values="cuentas", template=TPL, hole=0.55,
+                     color_discrete_sequence=[CORAL, AMBAR])
+        fig.update_traces(textinfo="label+percent", textfont=dict(color="white", size=14))
+        fig.update_layout(title="Reparto del churn por segmento", height=320, margin=dict(t=46, b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    cols = st.columns(2)
+    for col, titulo, cont in [("plan", "Tasa de churn por plan", cols[0]), ("pais", "Tasa de churn por pais", cols[1])]:
+        with cont:
+            g = churn_por(d, col)
+            fig = px.bar(g, x=col, y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color_discrete_sequence=[CORAL])
+            fig.update_traces(textposition="outside", cliponaxis=False)
+            fig.update_layout(title=titulo, yaxis_tickformat=".0%", height=320, margin=dict(t=40, b=10), showlegend=False,
+                              yaxis_title="", xaxis_title="", xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+            st.plotly_chart(fig, use_container_width=True)
+    st.markdown("##### Composicion de la base por estado")
+    g = d.estado_cuenta.value_counts().reset_index(); g.columns = ["estado", "cuentas"]
+    fig = px.bar(g, x="cuentas", y="estado", orientation="h", template=TPL, color="estado",
+                 color_discrete_map={"activo": TEAL, "suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}, text="cuentas")
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    fig.update_layout(height=250, showlegend=False, margin=dict(t=10, b=10), yaxis_title="", xaxis_title="cuentas",
+                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
+    st.plotly_chart(fig, use_container_width=True)
+
 
 
 # ---------------- Causa raiz ----------------
