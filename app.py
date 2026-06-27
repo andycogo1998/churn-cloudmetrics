@@ -708,20 +708,34 @@ with T["Negocio"]:
 # ---------------- Causa raiz ----------------
 with T["Causa raiz"]:
     st.subheader("Cómo llegamos a la causa raíz")
-    st.markdown("Antes de señalar un culpable medimos el efecto de **todas** las variables sobre el churn, no solo "
-                "las de activación. Con ese panorama completo separamos lo que explica la baja de lo que solo la acompaña.")
 
     base = d[col_churn].mean()
     si = lambda c: d[c].fillna("").str.lower().eq("si")
     num = lambda c: pd.to_numeric(d[c], errors="coerce")
+
+    # --- Diagnostico de la causa raiz (automatico) ---
+    ch0 = d[d["fallas_activacion"] == 0][col_churn].mean() if (d["fallas_activacion"] == 0).any() else 0
+    chmax = d[d["fallas_activacion"] == d["fallas_activacion"].max()][col_churn].mean()
+    chd = d[d[col_churn]]
+    pct2 = (chd["fallas_activacion"] >= 2).mean() if len(chd) else 0
+    diag = (f"<b>La causa raíz del churn es una activación incompleta.</b> Las cuentas que no completan los primeros "
+            f"pasos de configuración del producto (configurar la empresa, emitir la primera factura, cargar el plan de "
+            f"cuentas, cargar empleados y activar cuentas por cobrar) se van mucho más. Una cuenta que completa los cinco "
+            f"pasos churnea cerca del {ch0:.0%}; una que no completa ninguno, cerca del {chmax:.0%}. De hecho, el "
+            f"<b>{pct2:.0%} del churn</b> son cuentas que dejaron dos o más de esos pasos sin completar. En cambio, las "
+            f"características del cliente como segmento, plan o país casi no influyen.")
+    st.markdown(
+        f"<div style='background:#f6fafa; border-left:4px solid {TEAL}; border-radius:8px; padding:12px 16px; margin-bottom:8px;'>"
+        f"<div style='font-size:0.78rem; font-weight:700; color:{TEAL}; letter-spacing:.04em;'>LA CAUSA RAÍZ DEL CHURN</div>"
+        f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{diag}</div></div>", unsafe_allow_html=True)
+
+    # --- 1. Uso del producto vs los retiros ---
+    st.markdown("##### 1. Medir el uso del producto vs los retiros")
     sweep = []
     def add(lbl, cat, mask):
         m = mask.fillna(False)
         if m.any():
             sweep.append({"senal": lbl, "categoria": cat, "churn": d[m][col_churn].mean()})
-
-    # --- 1. Barrido completo ---
-    st.markdown("##### 1. Medimos el efecto de cada señal")
     if "sesiones_promedio_semana" in d.columns: add("Menos de 1 sesión por semana", "Síntoma", num("sesiones_promedio_semana").fillna(0) < 1)
     if "login_ultimos_30_dias" in d.columns: add("Sin login en 30 días", "Síntoma", ~si("login_ultimos_30_dias"))
     if "dias_primer_factura" in d.columns: add("Tardó más de 14 días en facturar", "Síntoma", num("dias_primer_factura") > 14)
@@ -748,18 +762,34 @@ with T["Causa raiz"]:
     figW.update_layout(height=540, xaxis_tickformat=".0%", xaxis=dict(range=[0, 1.12]), margin=dict(t=24, b=10),
                        yaxis_title="", xaxis_title="churn cuando la señal está presente", legend_title="", yaxis=dict(automargin=True))
     st.plotly_chart(figW, use_container_width=True)
-    st.caption("Cada barra es la tasa de churn de las cuentas que tienen esa señal, frente al churn base. Un **síntoma** "
-               "ocurre al final, pegado a la baja; una **causa** ocurre temprano y se puede accionar.")
 
-    # --- 2. Sintoma vs causa ---
-    st.markdown("##### 2. ¿Síntoma o causa?")
-    st.markdown("Arriba de todo aparecen el login y las sesiones: predicen el churn casi perfecto, pero son **síntomas**. "
-                "Casi ninguna cuenta en churn tiene login reciente, y ninguna cuenta activa está así, de modo que \"no entrar "
-                "en 30 días\" prácticamente describe el abandono en lugar de explicarlo, y llega tarde para actuar. Por eso "
-                "miramos lo que pasa antes: la activación.")
+    # --- 2. Caracteristicas del usuario vs churn ---
+    st.markdown("##### 2. Medir las características del usuario vs churn")
+    PAL = [TEAL, CORAL, AMBAR, NAVY, GRIS, TEAL_OSCURO, AZUL]
+    perfil = [("segmento", "Segmento"), ("plan", "Plan"), ("pais", "País"), ("metodo_pago", "Método de pago")]
+    perfil = [(c, l) for c, l in perfil if c in d.columns]
+    filas_p = [perfil[i:i + 2] for i in range(0, len(perfil), 2)]
+    for fila in filas_p:
+        cps = st.columns(2)
+        for (col, lbl), cont in zip(fila, cps):
+            with cont:
+                g = churn_por(d, col).sort_values("tasa")
+                fig = px.bar(g, x="tasa", y=col, orientation="h", template=TPL, text=g["tasa"].map("{:.0%}".format),
+                             color=col, color_discrete_sequence=PAL)
+                fig.update_traces(textposition="outside", cliponaxis=False)
+                fig.update_layout(title=lbl, height=260, showlegend=False, margin=dict(t=36, b=10),
+                                  yaxis_title="", xaxis_title="", xaxis=dict(range=[0, 0.5], tickformat=".0%"),
+                                  yaxis=dict(automargin=True))
+                st.plotly_chart(fig, use_container_width=True)
+    st.caption("Ninguna característica del cliente separa mucho el churn: todas las barras rondan el churn base del 22%.")
 
-    # --- 3. Activacion: las 5 senales ---
-    st.markdown("##### 3. El bloque que sí explica: la activación")
+    # --- 3. Sintoma o causa ---
+    st.markdown("##### 3. ¿Síntoma o causa?")
+    st.markdown("Un **síntoma** ocurre al final, pegado a la baja, y avisa demasiado tarde para actuar, como no tener login "
+                "reciente. Una **causa** ocurre temprano y se puede accionar, como completar la activación.")
+
+    # --- 4. El bloque que explica: la activacion ---
+    st.markdown("##### 4. El bloque que sí explica: la activación")
     senales5 = [("configuracion_empresa_completa", "Configuración de empresa"),
                 ("plan_cuentas_configurado", "Plan de cuentas"),
                 ("empleados_cargados", "Empleados cargados"),
@@ -781,49 +811,38 @@ with T["Causa raiz"]:
     figS.update_layout(height=340, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
                        yaxis_title="", xaxis_title="tasa de churn", legend_title="", xaxis=dict(range=[0, 1]), yaxis=dict(automargin=True))
     st.plotly_chart(figS, use_container_width=True)
-    st.caption("Las cinco señales del arranque, cada una por separado, multiplican el churn cuando fallan. Son tempranas "
-               "y accionables, lo que las vuelve una causa y no un síntoma.")
 
-    # --- 4. La escalera ---
-    st.markdown("##### 4. La prueba: cuántas señales fallan")
+    # --- 5. La prueba: a mas hitos sin completar, mas se van ---
+    st.markdown("##### 5. Cuantos más hitos sin completar, más se van")
     esc = d.groupby("fallas_activacion").agg(cuentas=("user_id", "count"), churn=(col_churn, "mean")).reset_index()
     esc = esc.sort_values("fallas_activacion")
     esc["etq"] = esc["fallas_activacion"].astype(int).astype(str)
     figE = px.bar(esc, x="etq", y="churn", text=esc["churn"].map("{:.0%}".format),
                   template=TPL, color="churn", color_continuous_scale=[TEAL, AMBAR, CORAL])
     figE.update_traces(textposition="outside", cliponaxis=False,
-                       customdata=esc[["cuentas"]], hovertemplate="%{x} señales fallan<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
-    figE.update_layout(title="Churn según cuántas señales de activación fallan (de 5)",
-                       height=400, yaxis_tickformat=".0%", coloraxis_showscale=False,
-                       yaxis_title="tasa de churn", xaxis_title="señales que fallan", margin=dict(t=48, b=10))
+                       customdata=esc[["cuentas"]], hovertemplate="%{x} hitos sin completar<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
+    figE.update_layout(title="Probabilidad de churn según hitos de arranque sin completar",
+                       height=380, yaxis_tickformat=".0%", coloraxis_showscale=False,
+                       yaxis_title="probabilidad de churn", xaxis_title="hitos sin completar (de 5)", margin=dict(t=44, b=10))
     st.plotly_chart(figE, use_container_width=True)
-    st.caption("Contamos, por cuenta, cuántas de las cinco señales fallan. El churn sube de forma escalonada, de 2% con el "
-               "arranque completo a 93% sin ninguna señal. Esa progresión ordenada confirma que la activación es el motor del churn.")
 
-    # --- 5. Lo que quedo afuera ---
-    st.markdown("##### 5. Lo que quedó afuera")
-    factores = []
-    ea = d.groupby("fallas_activacion")[col_churn].mean()
-    if len(ea): factores.append(("Activación (0 a 5 fallas)", ea.min(), ea.max()))
-    for col, lbl in [("pais", "País"), ("plan", "Plan"), ("segmento", "Segmento")]:
-        if col in d.columns:
-            gg = d.groupby(col)[col_churn].mean()
-            if len(gg): factores.append((lbl, gg.min(), gg.max()))
-    fr = pd.DataFrame([{"factor": f, "spread": hi - lo, "lo": lo, "hi": hi} for f, lo, hi in factores]).sort_values("spread")
-    tope = fr["spread"].max() * 1.35 if len(fr) else 1
-    figR = px.bar(fr, x="spread", y="factor", orientation="h", template=TPL,
-                  text=fr.apply(lambda r: f"{r.lo:.0%} a {r.hi:.0%}", axis=1),
-                  color="spread", color_continuous_scale=[GRIS, AMBAR, CORAL])
-    figR.update_traces(textposition="outside", cliponaxis=False)
-    figR.update_layout(height=300, coloraxis_showscale=False, xaxis_tickformat=".0%",
-                       yaxis_title="", xaxis_title="cuánto separa el churn (mayor menos menor)",
-                       margin=dict(t=10, b=10), xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
-    st.plotly_chart(figR, use_container_width=True)
-    st.caption("El perfil del cliente (segmento, plan, país) casi no separa el churn. También quedaron fuera del índice el "
-               "banco conectado, por efecto débil, y los módulos de nicho como nómina e inventario, que usa poca gente.")
-
-    st.info("El camino, en una línea: medimos todo, descartamos los síntomas que avisan tarde, y nos quedamos con las cinco "
-            "señales de activación, que son tempranas, accionables y de efecto fuerte. La palanca contra el churn está en el arranque.")
+    # Composicion del churn por hitos sin completar
+    st.markdown("###### ¿De dónde viene el churn?")
+    chd2 = d[d[col_churn]].copy()
+    if len(chd2):
+        chd2["bucket"] = pd.cut(chd2["fallas_activacion"], bins=[-1, 1, 2, 5],
+                                labels=["0 a 1 hito", "2 hitos", "3 o más hitos"])
+        gcomp = chd2["bucket"].value_counts().reindex(["0 a 1 hito", "2 hitos", "3 o más hitos"]).reset_index()
+        gcomp.columns = ["bucket", "cuentas"]
+        cc = st.columns([1, 2, 1])
+        with cc[1]:
+            figC = px.pie(gcomp, names="bucket", values="cuentas", template=TPL, hole=0.55,
+                          color="bucket", color_discrete_map={"0 a 1 hito": TEAL, "2 hitos": AMBAR, "3 o más hitos": CORAL})
+            figC.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13), sort=False)
+            figC.update_layout(title="Reparto del churn segun hitos sin completar", height=320, margin=dict(t=46, b=10), showlegend=False)
+            st.plotly_chart(figC, use_container_width=True)
+        st.caption(f"El {pct2:.0%} del churn son cuentas que dejaron dos o más hitos de arranque sin completar. "
+                   "El abandono se concentra en las cuentas que arrancaron mal, no en las que arrancaron bien.")
 
 
 
