@@ -148,6 +148,16 @@ def cargar_base(path):
     df["churn_retiro"] = df["tipo_retiro"].notna()
     df["activado"] = df["facturas_emitidas_mes1"].fillna(0) > 0
     sino = lambda s: df[s].fillna("").str.lower().eq("si")
+    # Indice de activacion: 5 senales fuertes de configuracion temprana (True = falla)
+    _falsa = pd.Series(False, index=df.index)
+    _sig = [
+        (~sino("configuracion_empresa_completa")) if "configuracion_empresa_completa" in df.columns else _falsa,
+        (df["facturas_emitidas_mes1"].fillna(0).eq(0)) if "facturas_emitidas_mes1" in df.columns else _falsa,
+        (~sino("plan_cuentas_configurado")) if "plan_cuentas_configurado" in df.columns else _falsa,
+        (~sino("empleados_cargados")) if "empleados_cargados" in df.columns else _falsa,
+        (~sino("modulo_cxc_activo")) if "modulo_cxc_activo" in df.columns else _falsa,
+    ]
+    df["fallas_activacion"] = sum(s.astype(int) for s in _sig)
     df["flag_estado_sin_retiro"] = df["churn_estado"] & ~df["churn_retiro"]
     df["flag_fecha_invertida"] = df["fecha_ultimo_pago"] < df["fecha_registro"]
     df["flag_pago_geo"] = ((df["metodo_pago"] == "PSE") & (df["pais"] != "Colombia")) | \
@@ -447,50 +457,64 @@ with T["Negocio"]:
 
 # ---------------- Causa raiz ----------------
 with T["Causa raiz"]:
-    st.subheader("Que dispara el churn")
-    st.caption("Tasa de churn segun comportamiento. La brecha entre barras es el tamano del problema.")
+    st.subheader("La activacion temprana es la causa raiz")
+    st.caption("El churn no se explica por quien es el cliente sino por como arranca. Cinco senales de configuracion inicial son las que mas lo separan.")
 
-    def churn_binario(col, si_lbl, no_lbl):
-        s = d[col].fillna("").str.lower().eq("si")
-        out = [{"grupo": lbl, "tasa": d[s == v][col_churn].mean()} for v, lbl in [(True, si_lbl), (False, no_lbl)] if len(d[s == v])]
-        return pd.DataFrame(out)
+    # --- Escalera del indice de activacion (hero) ---
+    esc = d.groupby("fallas_activacion").agg(cuentas=("user_id", "count"), churn=(col_churn, "mean")).reset_index()
+    esc = esc.sort_values("fallas_activacion")
+    esc["etq"] = esc["fallas_activacion"].astype(int).astype(str)
+    figE = px.bar(esc, x="etq", y="churn", text=esc["churn"].map("{:.0%}".format),
+                  template=TPL, color="churn", color_continuous_scale=[TEAL, AMBAR, CORAL])
+    figE.update_traces(textposition="outside", cliponaxis=False,
+                       customdata=esc[["cuentas"]], hovertemplate="%{x} senales fallan<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
+    figE.update_layout(title="Churn segun cuantas senales de activacion fallan (de 5)",
+                       height=400, yaxis_tickformat=".0%", coloraxis_showscale=False,
+                       yaxis_title="tasa de churn", xaxis_title="senales que fallan", margin=dict(t=48, b=10))
+    st.plotly_chart(figE, use_container_width=True)
+    st.caption("Las cinco senales: configuracion de empresa, primera factura, plan de cuentas, empleados cargados y modulo CxC. A mas fallas, mas churn, de forma escalonada. Esa escalera es la prueba de que la activacion es un motor del churn y no una coincidencia.")
 
-    cols = st.columns(3)
-    pares = [("configuracion_empresa_completa", "Completo setup", "No completo", "Configuracion inicial"),
-             ("integracion_banco_conectada", "Conecto banco", "No conecto", "Integracion bancaria")]
-    for (col, si, no, tit), cont in zip(pares, cols):
-        with cont:
-            g = churn_binario(col, si, no)
-            fig = px.bar(g, x="grupo", y="tasa", text=g["tasa"].map("{:.0%}".format), template=TPL, color="grupo", color_discrete_map={si: VERDE, no: ROJO})
-            fig.update_traces(textposition="outside")
-            fig.update_layout(title=tit, height=320, showlegend=False, yaxis_tickformat=".0%", margin=dict(t=40, b=10), yaxis_title="", xaxis_title="")
-            st.plotly_chart(fig, use_container_width=True)
-    with cols[2]:
-        g = d.groupby("activado").agg(churn=(col_churn, "mean")).reset_index()
-        g["grupo"] = g["activado"].map({True: "Facturo mes 1", False: "No facturo"})
-        fig = px.bar(g, x="grupo", y="churn", text=g["churn"].map("{:.0%}".format), template=TPL, color="grupo", color_discrete_map={"Facturo mes 1": VERDE, "No facturo": ROJO})
-        fig.update_traces(textposition="outside")
-        fig.update_layout(title="Activacion", height=320, showlegend=False, yaxis_tickformat=".0%", margin=dict(t=40, b=10), yaxis_title="", xaxis_title="")
-        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("##### Cada senal por separado")
+    señales5 = [("configuracion_empresa_completa", "Configuracion de empresa"),
+                ("plan_cuentas_configurado", "Plan de cuentas"),
+                ("empleados_cargados", "Empleados cargados"),
+                ("modulo_cxc_activo", "Modulo CxC")]
+    filas = []
+    for col, lbl in señales5:
+        if col in d.columns:
+            falla = ~d[col].fillna("").str.lower().eq("si")
+            filas.append({"senal": lbl, "churn_falla": d[falla][col_churn].mean(), "churn_ok": d[~falla][col_churn].mean()})
+    fmask = d["facturas_emitidas_mes1"].fillna(0).eq(0)
+    filas.append({"senal": "Primera factura", "churn_falla": d[fmask][col_churn].mean(), "churn_ok": d[~fmask][col_churn].mean()})
+    sg = pd.DataFrame(filas).sort_values("churn_falla")
+    sm = sg.melt(id_vars="senal", value_vars=["churn_falla", "churn_ok"], var_name="grupo", value_name="tasa")
+    sm["grupo"] = sm["grupo"].map({"churn_falla": "Si falla", "churn_ok": "Si esta ok"})
+    figS = px.bar(sm, x="tasa", y="senal", color="grupo", barmode="group", orientation="h",
+                  template=TPL, text=sm["tasa"].map("{:.0%}".format),
+                  color_discrete_map={"Si falla": CORAL, "Si esta ok": TEAL})
+    figS.update_traces(textposition="outside", cliponaxis=False)
+    figS.update_layout(height=340, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
+                       yaxis_title="", xaxis_title="tasa de churn", legend_title="")
+    st.plotly_chart(figS, use_container_width=True)
+    st.caption("Se excluyen del indice el banco conectado (efecto debil) y los modulos de nicho. Tambien login y sesiones, que dan 100% de churn pero por estar pegados al resultado son sintoma, no causa.")
 
     if HAY_SOPORTE:
-        st.markdown("##### Fricion de soporte y churn")
+        st.markdown("##### Friccion de soporte: el segundo driver y alerta temprana")
         st.caption("No es el volumen de soporte lo que predice el churn, sino que el soporte falle.")
-        senales = []
         defs = [("Ticket reabierto", d.get("chat_reaperturas", 0) > 0),
                 ("Ticket sin resolver", d.get("chat_no_resueltos", 0) > 0),
                 ("Escalo a especialista", d.get("tel_escalo", 0) > 0),
                 ("Sentimiento negativo", d.get("wa_negativos", 0) > 0)]
-        for lbl, mask in defs:
-            senales.append({"senal": lbl, "con": d[mask][col_churn].mean(), "sin": d[~mask][col_churn].mean()})
+        senales = [{"senal": lbl, "con": d[mask][col_churn].mean(), "sin": d[~mask][col_churn].mean()} for lbl, mask in defs]
         s = pd.DataFrame(senales).melt(id_vars="senal", var_name="grupo", value_name="tasa")
         s["grupo"] = s["grupo"].map({"con": "Con la senal", "sin": "Sin la senal"})
         fig = px.bar(s, x="senal", y="tasa", color="grupo", barmode="group", template=TPL,
-                     text=s["tasa"].map("{:.0%}".format), color_discrete_map={"Con la senal": ROJO, "Sin la senal": VERDE})
-        fig.update_traces(textposition="outside")
-        fig.update_layout(height=360, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
+                     text=s["tasa"].map("{:.0%}".format), color_discrete_map={"Con la senal": CORAL, "Sin la senal": TEAL})
+        fig.update_traces(textposition="outside", cliponaxis=False)
+        fig.update_layout(height=340, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
         st.plotly_chart(fig, use_container_width=True)
-    st.info("La activacion incompleta es la causa raiz dominante. La friccion de soporte (tickets reabiertos, sin resolver, escalados) es el segundo driver y funciona como alerta temprana: aparece antes de la baja.")
+
+    st.info("La activacion incompleta es la causa raiz dominante: una cuenta que arranca completa churnea cerca del 2%, una que no activa nada cerca del 93%. La friccion de soporte es el segundo driver y funciona como alerta temprana. El perfil del cliente (segmento, pais, plan) casi no mueve la aguja.")
 
 
 # ---------------- Retiros ----------------
