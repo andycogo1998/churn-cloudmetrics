@@ -328,7 +328,9 @@ with T["Resumen"]:
     nivel = "ok" if pct_riesgo < 0.20 else ("warn" if pct_riesgo < 0.35 else "bad")
     _bordes = {"ok": TEAL, "warn": AMBAR, "bad": CORAL}
     cuerpo = (f"<b>La base activa es de {n_act:,} cuentas con MRR ${mrr_act:,.0f}.</b> "
-              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) tienen un arranque flojo, dos o mas pasos de onboarding sin completar, "
+              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) tienen un arranque flojo, es decir dos o mas de los cinco "
+              f"pasos clave de arranque sin completar (configurar la empresa, emitir la primera factura, cargar el "
+              f"plan de cuentas, cargar empleados y activar cuentas por cobrar), "
               f"que es el grupo con mas riesgo de churn.")
     if alertas:
         cuerpo += "<br><b>Anomalias detectadas:</b><ul style='margin:4px 0 0 0; padding-left:18px;'>" + "".join(f"<li>{a}</li>" for a in alertas) + "</ul>"
@@ -407,7 +409,8 @@ with T["Resumen"]:
                  text=g["pct"].map("{:.0%}".format), color_discrete_map={"Activa": TEAL, "Churn": CORAL})
     fig.update_traces(textposition="inside", textfont=dict(color="white", size=11), insidetextanchor="middle")
     fig.update_layout(height=360, xaxis_title="mes de registro", yaxis_title="cuentas",
-                      legend=dict(orientation="h", y=1.1, x=0))
+                      legend=dict(orientation="h", y=1.1, x=0),
+                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
@@ -433,6 +436,13 @@ with T["Resumen"]:
                       yaxis_title="cuentas activas", xaxis_title="",
                       xaxis=dict(showgrid=False), yaxis=dict(showgrid=False))
     st.plotly_chart(fig, use_container_width=True)
+    st.markdown(
+        f"<div style='font-size:0.85rem; color:{NAVY}; line-height:1.7;'>"
+        f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 5 pasos. &nbsp;|&nbsp; "
+        f"<b style='color:#5FBDB3;'>Buen arranque</b>: 4 de 5, le falta 1. &nbsp;|&nbsp; "
+        f"<b style='color:{AMBAR};'>Arranque a medias</b>: 3 de 5, le faltan 2. &nbsp;|&nbsp; "
+        f"<b style='color:{CORAL};'>Arranque pobre</b>: 2 o menos, le faltan 3 o mas."
+        f"</div>", unsafe_allow_html=True)
     flojo = int((sa["fallas_activacion"] >= 2).sum())
     st.caption(f"{flojo:,} cuentas activas estan en arranque a medias o pobre. Son las que conviene acompanar con onboarding antes de que se vayan.")
 
