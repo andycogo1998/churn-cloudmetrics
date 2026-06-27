@@ -706,71 +706,109 @@ with T["Negocio"]:
 
 
 # ---------------- Causa raiz ----------------
-
 with T["Causa raiz"]:
-    st.subheader("La activacion temprana es la causa raiz")
-    st.markdown(
-        "El churn de CloudMetrics no se explica por quien es el cliente, sino por como arranca. "
-        "Una cuenta que completa su configuracion inicial casi no se va; una que no logra activarse se va casi siempre. "
-        "Lo que sigue muestra, con los datos, por que la activacion es la causa raiz, que la distingue de un simple "
-        "sintoma, y por que el perfil del cliente casi no importa.")
+    st.subheader("Cómo llegamos a la causa raíz")
+    st.markdown("Antes de señalar un culpable medimos el efecto de **todas** las variables sobre el churn, no solo "
+                "las de activación. Con ese panorama completo separamos lo que explica la baja de lo que solo la acompaña.")
 
-    # --- Escalera del indice de activacion (hero) ---
-    st.markdown("##### El indice de activacion: a peor arranque, mas churn")
+    base = d[col_churn].mean()
+    si = lambda c: d[c].fillna("").str.lower().eq("si")
+    num = lambda c: pd.to_numeric(d[c], errors="coerce")
+    sweep = []
+    def add(lbl, cat, mask):
+        m = mask.fillna(False)
+        if m.any():
+            sweep.append({"senal": lbl, "categoria": cat, "churn": d[m][col_churn].mean()})
+
+    # --- 1. Barrido completo ---
+    st.markdown("##### 1. Medimos el efecto de cada señal")
+    if "sesiones_promedio_semana" in d.columns: add("Menos de 1 sesión por semana", "Síntoma", num("sesiones_promedio_semana").fillna(0) < 1)
+    if "login_ultimos_30_dias" in d.columns: add("Sin login en 30 días", "Síntoma", ~si("login_ultimos_30_dias"))
+    if "dias_primer_factura" in d.columns: add("Tardó más de 14 días en facturar", "Síntoma", num("dias_primer_factura") > 14)
+    add("Configuración de empresa incompleta", "Activación", ~si("configuracion_empresa_completa"))
+    add("Primera factura no emitida", "Activación", num("facturas_emitidas_mes1").fillna(0).eq(0))
+    add("Plan de cuentas sin configurar", "Activación", ~si("plan_cuentas_configurado"))
+    add("Empleados no cargados", "Activación", ~si("empleados_cargados"))
+    add("Módulo CxC no activo", "Activación", ~si("modulo_cxc_activo"))
+    add("Banco no conectado", "Activación", ~si("integracion_banco_conectada"))
+    if "reportes_generados_mes3" in d.columns: add("Sin reportes en el mes 3", "Intensidad de uso", num("reportes_generados_mes3").eq(0))
+    if "facturas_emitidas_mes3" in d.columns: add("Sin facturas en el mes 3", "Intensidad de uso", num("facturas_emitidas_mes3").eq(0))
+    if "chat_reaperturas" in d.columns: add("Ticket de soporte reabierto", "Soporte", num("chat_reaperturas").fillna(0) > 0)
+    if "chat_no_resueltos" in d.columns: add("Ticket sin resolver", "Soporte", num("chat_no_resueltos").fillna(0) > 0)
+    if "tel_escalo" in d.columns: add("Llamada escalada", "Soporte", num("tel_escalo").fillna(0) > 0)
+    add("Módulo de nómina no activo", "Nicho", ~si("modulo_nomina_activo"))
+    add("Módulo de inventario no activo", "Nicho", ~si("modulo_inventario_activo"))
+    sw = pd.DataFrame(sweep).dropna(subset=["churn"]).sort_values("churn")
+    cmap_cat = {"Síntoma": GRIS, "Activación": TEAL, "Intensidad de uso": NAVY, "Soporte": AMBAR, "Nicho": "#C8D0D8"}
+    figW = px.bar(sw, x="churn", y="senal", color="categoria", orientation="h", template=TPL,
+                  text=sw["churn"].map("{:.0%}".format), color_discrete_map=cmap_cat)
+    figW.update_traces(textposition="outside", cliponaxis=False)
+    figW.add_vline(x=base, line_dash="dash", line_color=NAVY)
+    figW.add_annotation(x=base, y=1.02, yref="paper", text=f"churn base {base:.0%}", showarrow=False, font=dict(color=NAVY, size=11))
+    figW.update_layout(height=540, xaxis_tickformat=".0%", xaxis=dict(range=[0, 1.12]), margin=dict(t=24, b=10),
+                       yaxis_title="", xaxis_title="churn cuando la señal está presente", legend_title="", yaxis=dict(automargin=True))
+    st.plotly_chart(figW, use_container_width=True)
+    st.caption("Cada barra es la tasa de churn de las cuentas que tienen esa señal, frente al churn base. Un **síntoma** "
+               "ocurre al final, pegado a la baja; una **causa** ocurre temprano y se puede accionar.")
+
+    # --- 2. Sintoma vs causa ---
+    st.markdown("##### 2. ¿Síntoma o causa?")
+    st.markdown("Arriba de todo aparecen el login y las sesiones: predicen el churn casi perfecto, pero son **síntomas**. "
+                "Casi ninguna cuenta en churn tiene login reciente, y ninguna cuenta activa está así, de modo que \"no entrar "
+                "en 30 días\" prácticamente describe el abandono en lugar de explicarlo, y llega tarde para actuar. Por eso "
+                "miramos lo que pasa antes: la activación.")
+
+    # --- 3. Activacion: las 5 senales ---
+    st.markdown("##### 3. El bloque que sí explica: la activación")
+    senales5 = [("configuracion_empresa_completa", "Configuración de empresa"),
+                ("plan_cuentas_configurado", "Plan de cuentas"),
+                ("empleados_cargados", "Empleados cargados"),
+                ("modulo_cxc_activo", "Módulo CxC")]
+    filas = []
+    for col, lbl in senales5:
+        if col in d.columns:
+            falla = ~si(col)
+            filas.append({"senal": lbl, "churn_falla": d[falla][col_churn].mean(), "churn_ok": d[~falla][col_churn].mean()})
+    fmask = num("facturas_emitidas_mes1").fillna(0).eq(0)
+    filas.append({"senal": "Primera factura", "churn_falla": d[fmask][col_churn].mean(), "churn_ok": d[~fmask][col_churn].mean()})
+    sg = pd.DataFrame(filas).sort_values("churn_falla")
+    sm = sg.melt(id_vars="senal", value_vars=["churn_falla", "churn_ok"], var_name="grupo", value_name="tasa")
+    sm["grupo"] = sm["grupo"].map({"churn_falla": "Si falla", "churn_ok": "Si está ok"})
+    figS = px.bar(sm, x="tasa", y="senal", color="grupo", barmode="group", orientation="h",
+                  template=TPL, text=sm["tasa"].map("{:.0%}".format),
+                  color_discrete_map={"Si falla": CORAL, "Si está ok": TEAL})
+    figS.update_traces(textposition="outside", cliponaxis=False)
+    figS.update_layout(height=340, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
+                       yaxis_title="", xaxis_title="tasa de churn", legend_title="", xaxis=dict(range=[0, 1]), yaxis=dict(automargin=True))
+    st.plotly_chart(figS, use_container_width=True)
+    st.caption("Las cinco señales del arranque, cada una por separado, multiplican el churn cuando fallan. Son tempranas "
+               "y accionables, lo que las vuelve una causa y no un síntoma.")
+
+    # --- 4. La escalera ---
+    st.markdown("##### 4. La prueba: cuántas señales fallan")
     esc = d.groupby("fallas_activacion").agg(cuentas=("user_id", "count"), churn=(col_churn, "mean")).reset_index()
     esc = esc.sort_values("fallas_activacion")
     esc["etq"] = esc["fallas_activacion"].astype(int).astype(str)
     figE = px.bar(esc, x="etq", y="churn", text=esc["churn"].map("{:.0%}".format),
                   template=TPL, color="churn", color_continuous_scale=[TEAL, AMBAR, CORAL])
     figE.update_traces(textposition="outside", cliponaxis=False,
-                       customdata=esc[["cuentas"]], hovertemplate="%{x} senales fallan<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
-    figE.update_layout(title="Churn segun cuantas senales de activacion fallan (de 5)",
+                       customdata=esc[["cuentas"]], hovertemplate="%{x} señales fallan<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
+    figE.update_layout(title="Churn según cuántas señales de activación fallan (de 5)",
                        height=400, yaxis_tickformat=".0%", coloraxis_showscale=False,
-                       yaxis_title="tasa de churn", xaxis_title="senales que fallan", margin=dict(t=48, b=10))
+                       yaxis_title="tasa de churn", xaxis_title="señales que fallan", margin=dict(t=48, b=10))
     st.plotly_chart(figE, use_container_width=True)
-    st.caption("Las cinco senales son pasos del arranque: configurar la empresa, emitir la primera factura, cargar el plan "
-               "de cuentas, cargar empleados y activar el modulo de cuentas por cobrar. La relacion es escalonada y monotona: "
-               "cada paso que queda sin hacer sube el churn. Ese patron dosis-respuesta es la firma de una causa, no de una casualidad.")
+    st.caption("Contamos, por cuenta, cuántas de las cinco señales fallan. El churn sube de forma escalonada, de 2% con el "
+               "arranque completo a 93% sin ninguna señal. Esa progresión ordenada confirma que la activación es el motor del churn.")
 
-    # --- Cada senal por separado ---
-    st.markdown("##### Cada senal aporta por su cuenta")
-    senales5 = [("configuracion_empresa_completa", "Configuracion de empresa"),
-                ("plan_cuentas_configurado", "Plan de cuentas"),
-                ("empleados_cargados", "Empleados cargados"),
-                ("modulo_cxc_activo", "Modulo CxC")]
-    filas = []
-    for col, lbl in senales5:
-        if col in d.columns:
-            falla = ~d[col].fillna("").str.lower().eq("si")
-            filas.append({"senal": lbl, "churn_falla": d[falla][col_churn].mean(), "churn_ok": d[~falla][col_churn].mean()})
-    fmask = d["facturas_emitidas_mes1"].fillna(0).eq(0)
-    filas.append({"senal": "Primera factura", "churn_falla": d[fmask][col_churn].mean(), "churn_ok": d[~fmask][col_churn].mean()})
-    sg = pd.DataFrame(filas).sort_values("churn_falla")
-    sm = sg.melt(id_vars="senal", value_vars=["churn_falla", "churn_ok"], var_name="grupo", value_name="tasa")
-    sm["grupo"] = sm["grupo"].map({"churn_falla": "Si falla", "churn_ok": "Si esta ok"})
-    figS = px.bar(sm, x="tasa", y="senal", color="grupo", barmode="group", orientation="h",
-                  template=TPL, text=sm["tasa"].map("{:.0%}".format),
-                  color_discrete_map={"Si falla": CORAL, "Si esta ok": TEAL})
-    figS.update_traces(textposition="outside", cliponaxis=False)
-    figS.update_layout(height=340, xaxis_tickformat=".0%", margin=dict(t=10, b=10),
-                       yaxis_title="", xaxis_title="tasa de churn", legend_title="", xaxis=dict(range=[0, 1]))
-    st.plotly_chart(figS, use_container_width=True)
-    st.caption("Cada una de las cinco senales, por separado, multiplica el churn cuando falla. Se excluyen del indice el banco "
-               "conectado (efecto debil) y los modulos de nicho como nomina o inventario (sirven a pocas cuentas).")
-
-    # --- El perfil no mueve la aguja ---
-    st.markdown("##### Lo que NO explica el churn: el perfil del cliente")
-    st.caption("Cuanto separa cada factor el churn, medido como la diferencia entre su grupo de mayor y menor churn. "
-               "La activacion abre un abismo; el segmento, el plan y el pais apenas se mueven alrededor del promedio.")
+    # --- 5. Lo que quedo afuera ---
+    st.markdown("##### 5. Lo que quedó afuera")
     factores = []
     ea = d.groupby("fallas_activacion")[col_churn].mean()
-    if len(ea):
-        factores.append(("Activacion (0 a 5 fallas)", ea.min(), ea.max()))
-    for col, lbl in [("pais", "Pais"), ("plan", "Plan"), ("segmento", "Segmento")]:
+    if len(ea): factores.append(("Activación (0 a 5 fallas)", ea.min(), ea.max()))
+    for col, lbl in [("pais", "País"), ("plan", "Plan"), ("segmento", "Segmento")]:
         if col in d.columns:
             gg = d.groupby(col)[col_churn].mean()
-            if len(gg):
-                factores.append((lbl, gg.min(), gg.max()))
+            if len(gg): factores.append((lbl, gg.min(), gg.max()))
     fr = pd.DataFrame([{"factor": f, "spread": hi - lo, "lo": lo, "hi": hi} for f, lo, hi in factores]).sort_values("spread")
     tope = fr["spread"].max() * 1.35 if len(fr) else 1
     figR = px.bar(fr, x="spread", y="factor", orientation="h", template=TPL,
@@ -778,46 +816,14 @@ with T["Causa raiz"]:
                   color="spread", color_continuous_scale=[GRIS, AMBAR, CORAL])
     figR.update_traces(textposition="outside", cliponaxis=False)
     figR.update_layout(height=300, coloraxis_showscale=False, xaxis_tickformat=".0%",
-                       yaxis_title="", xaxis_title="cuanto separa el churn (mayor menos menor)",
+                       yaxis_title="", xaxis_title="cuánto separa el churn (mayor menos menor)",
                        margin=dict(t=10, b=10), xaxis=dict(range=[0, tope]), yaxis=dict(automargin=True))
     st.plotly_chart(figR, use_container_width=True)
-    st.caption("Por eso el indice se construye sobre como arranca la cuenta y no sobre quien es. Atacar la activacion sirve "
-               "para toda la base; segmentar por perfil no llevaria a ningun lado.")
+    st.caption("El perfil del cliente (segmento, plan, país) casi no separa el churn. También quedaron fuera del índice el "
+               "banco conectado, por efecto débil, y los módulos de nicho como nómina e inventario, que usa poca gente.")
 
-    # --- Sintoma vs causa ---
-    st.markdown("##### Sintoma o causa: por que no usamos el login ni las sesiones")
-    st.markdown(
-        "Hay senales que predicen el churn casi a la perfeccion: una cuenta sin login en los ultimos 30 dias o con menos "
-        "de una sesion por semana se va practicamente siempre. Pero esas senales son un **sintoma**, no una causa: ocurren "
-        "al final, pegadas a la baja, cuando el cliente ya se desconecto. Avisan demasiado tarde para actuar. "
-        "La activacion, en cambio, ocurre en las primeras semanas, antes de que el cliente se vaya, y es algo sobre lo que "
-        "el equipo puede intervenir. Por eso el indice se queda con las senales de arranque: llegan a tiempo y son accionables.")
-
-    # --- Friccion de soporte ---
-    if HAY_SOPORTE:
-        st.markdown("##### El segundo driver: que el soporte falle")
-        st.caption("No es el volumen de soporte lo que predice el churn, sino que el soporte falle. Un ticket reabierto o "
-                   "sin resolver es una alerta temprana que aparece antes de la baja.")
-        posibles = [("Ticket reabierto", "chat_reaperturas"), ("Ticket sin resolver", "chat_no_resueltos"),
-                    ("Escalo a especialista", "tel_escalo"), ("Sentimiento negativo", "wa_negativos")]
-        senales = []
-        for lbl, c in posibles:
-            if c in d.columns:
-                mask = pd.to_numeric(d[c], errors="coerce").fillna(0) > 0
-                senales.append({"senal": lbl, "con": d[mask][col_churn].mean(), "sin": d[~mask][col_churn].mean()})
-        if senales:
-            s = pd.DataFrame(senales).melt(id_vars="senal", var_name="grupo", value_name="tasa")
-            s["grupo"] = s["grupo"].map({"con": "Con la senal", "sin": "Sin la senal"})
-            fig = px.bar(s, x="senal", y="tasa", color="grupo", barmode="group", template=TPL,
-                         text=s["tasa"].map("{:.0%}".format), color_discrete_map={"Con la senal": CORAL, "Sin la senal": TEAL})
-            fig.update_traces(textposition="outside", cliponaxis=False)
-            fig.update_layout(height=340, yaxis_tickformat=".0%", margin=dict(t=10, b=10), yaxis_title="tasa de churn", xaxis_title="", legend_title="")
-            st.plotly_chart(fig, use_container_width=True)
-
-    st.info("En resumen: la activacion incompleta es la causa raiz dominante. Una cuenta que arranca completa churnea cerca "
-            "del 2% y una que no activa nada cerca del 93%. La friccion de soporte es el segundo driver y sirve de alerta "
-            "temprana. El perfil del cliente (segmento, plan, pais) casi no mueve la aguja, y las senales de uso como el login "
-            "son sintomas que avisan tarde. La palanca esta en el arranque.")
+    st.info("El camino, en una línea: medimos todo, descartamos los síntomas que avisan tarde, y nos quedamos con las cinco "
+            "señales de activación, que son tempranas, accionables y de efecto fuerte. La palanca contra el churn está en el arranque.")
 
 
 
