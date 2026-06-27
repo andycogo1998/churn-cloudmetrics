@@ -319,7 +319,7 @@ with T["Resumen"]:
     if n_act:
         por_pais = act.assign(r=riesgo_mask).groupby("pais")["r"].mean()
         if len(por_pais) and por_pais.max() > pct_riesgo + 0.08:
-            alertas.append(f"{por_pais.idxmax()} concentra mas arranque flojo que el promedio: {por_pais.max():.0%} de sus activas en riesgo frente al {pct_riesgo:.0%} general.")
+            alertas.append(f"{por_pais.idxmax()} concentra mas cuentas con arranque parcial o critico que el promedio: {por_pais.max():.0%} de sus activas en riesgo frente al {pct_riesgo:.0%} general.")
         por_plan = act.assign(r=riesgo_mask).groupby("plan")["r"].mean()
         if len(por_plan) and por_plan.max() > pct_riesgo + 0.08:
             alertas.append(f"El plan {por_plan.idxmax()} arranca peor que el resto: {por_plan.max():.0%} de sus activas en riesgo.")
@@ -328,7 +328,8 @@ with T["Resumen"]:
     nivel = "ok" if pct_riesgo < 0.20 else ("warn" if pct_riesgo < 0.35 else "bad")
     _bordes = {"ok": TEAL, "warn": AMBAR, "bad": CORAL}
     cuerpo = (f"<b>La base activa es de {n_act:,} cuentas con MRR ${mrr_act:,.0f}.</b> "
-              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) tienen un arranque flojo, es decir dos o mas de los cinco "
+              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) estan en arranque parcial o critico, los dos niveles mas bajos "
+              f"del termometro, es decir con dos o mas de los cinco "
               f"pasos clave de arranque sin completar (configurar la empresa, emitir la primera factura, cargar el "
               f"plan de cuentas, cargar empleados y activar cuentas por cobrar), "
               f"que es el grupo con mas riesgo de churn.")
@@ -422,11 +423,11 @@ with T["Resumen"]:
                "empleados y activar cuentas por cobrar. Cuanto peor arranca una cuenta, mas chances tiene de "
                "terminar yendose. Este grafico muestra como esta hoy la base activa segun ese arranque.")
     def _tier(n):
-        return "Arranque completo" if n == 0 else "Buen arranque" if n == 1 else "Arranque a medias" if n == 2 else "Arranque pobre"
+        return "Arranque completo" if n == 0 else "Buen arranque" if n == 1 else "Arranque parcial" if n == 2 else "Arranque critico"
     sa = act.copy()
     sa["tier"] = sa["fallas_activacion"].apply(_tier)
-    orden = ["Arranque completo", "Buen arranque", "Arranque a medias", "Arranque pobre"]
-    colmap = {"Arranque completo": TEAL, "Buen arranque": "#5FBDB3", "Arranque a medias": AMBAR, "Arranque pobre": CORAL}
+    orden = ["Arranque completo", "Buen arranque", "Arranque parcial", "Arranque critico"]
+    colmap = {"Arranque completo": TEAL, "Buen arranque": "#5FBDB3", "Arranque parcial": AMBAR, "Arranque critico": CORAL}
     g = sa["tier"].value_counts().reindex(orden, fill_value=0).reset_index()
     g.columns = ["tier", "cuentas"]
     fig = px.bar(g, x="tier", y="cuentas", template=TPL, text="cuentas", color="tier",
@@ -440,11 +441,11 @@ with T["Resumen"]:
         f"<div style='font-size:0.85rem; color:{NAVY}; line-height:1.7;'>"
         f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 5 pasos. &nbsp;|&nbsp; "
         f"<b style='color:#5FBDB3;'>Buen arranque</b>: 4 de 5, le falta 1. &nbsp;|&nbsp; "
-        f"<b style='color:{AMBAR};'>Arranque a medias</b>: 3 de 5, le faltan 2. &nbsp;|&nbsp; "
-        f"<b style='color:{CORAL};'>Arranque pobre</b>: 2 o menos, le faltan 3 o mas."
+        f"<b style='color:{AMBAR};'>Arranque parcial</b>: 3 de 5, le faltan 2. &nbsp;|&nbsp; "
+        f"<b style='color:{CORAL};'>Arranque critico</b>: 2 o menos, le faltan 3 o mas."
         f"</div>", unsafe_allow_html=True)
     flojo = int((sa["fallas_activacion"] >= 2).sum())
-    st.caption(f"{flojo:,} cuentas activas estan en arranque a medias o pobre. Son las que conviene acompanar con onboarding antes de que se vayan.")
+    st.caption(f"{flojo:,} cuentas activas estan en arranque parcial o critico. Son las que conviene acompanar con onboarding antes de que se vayan.")
 
 
 
