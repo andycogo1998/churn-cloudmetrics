@@ -449,6 +449,41 @@ with T["General"]:
         f"<b style='color:{CORAL};'>Arranque critico</b>: 1 o ninguno, le faltan 3 o mas."
         f"</div>", unsafe_allow_html=True)
 
+    # ---- Lista accionable: cuentas activas en riesgo ----
+    st.markdown("---")
+    st.subheader("Cuentas activas en riesgo")
+    st.caption("Lista accionable: cuentas activas hoy con hitos de activacion sin completar, ordenadas por MRR en riesgo. "
+               "Es a quien conviene acompanar primero desde Customer Success, antes de que se vayan.")
+    umbral = st.slider("Minimo de hitos sin completar para entrar en la lista", 1, 4, 2)
+    rg = act[act["fallas_activacion"] >= umbral].copy()
+    if len(rg) == 0:
+        st.info("No hay cuentas activas que cumplan ese umbral en el filtro actual.")
+    else:
+        labels = [
+            ("Configurar empresa", ~rg["configuracion_empresa_completa"].fillna("").str.lower().eq("si") if "configuracion_empresa_completa" in rg.columns else None),
+            ("Primera factura", pd.to_numeric(rg["facturas_emitidas_mes1"], errors="coerce").fillna(0).eq(0) if "facturas_emitidas_mes1" in rg.columns else None),
+            ("Plan de cuentas", ~rg["plan_cuentas_configurado"].fillna("").str.lower().eq("si") if "plan_cuentas_configurado" in rg.columns else None),
+            ("Empleados", ~rg["empleados_cargados"].fillna("").str.lower().eq("si") if "empleados_cargados" in rg.columns else None),
+        ]
+        labels = [(l, m) for l, m in labels if m is not None]
+        mask_df = pd.DataFrame({l: m.values for l, m in labels}, index=rg.index)
+        rg["hitos_faltantes"] = [", ".join(c for c in mask_df.columns if mask_df.loc[i, c]) for i in rg.index]
+
+        cr = st.columns(2)
+        tarjeta_kpi(cr[0], "Cuentas activas en riesgo", f"{len(rg):,}", f"{umbral} o mas hitos sin completar")
+        tarjeta_kpi(cr[1], "MRR en riesgo / mes", f"${rg['mrr'].sum():,.0f}", "ingreso recurrente expuesto")
+
+        cols_full = ["user_id", "nombre_empresa", "segmento", "pais", "plan", "mrr", "metodo_pago",
+                     "fallas_activacion", "hitos_faltantes", "sesiones_promedio_semana",
+                     "login_ultimos_30_dias", "fecha_registro", "fecha_ultimo_pago"]
+        cols_full = [c for c in cols_full if c in rg.columns]
+        tabla = rg[cols_full].sort_values("mrr", ascending=False).rename(
+            columns={"mrr": "mrr_usd", "fallas_activacion": "hitos_sin_completar"})
+        st.dataframe(tabla, hide_index=True, use_container_width=True)
+        st.download_button("Descargar lista de cuentas en riesgo",
+                           tabla.to_csv(index=False).encode("utf-8"),
+                           "cuentas_activas_en_riesgo.csv", "text/csv")
+
 
 
 # ---------------- Churn ----------------
@@ -830,47 +865,15 @@ with T["Causa raiz"]:
                                 labels=["0 a 1 hito", "2 hitos", "3 o más hitos"])
         gcomp = chd2["bucket"].value_counts().reindex(["0 a 1 hito", "2 hitos", "3 o más hitos"]).reset_index()
         gcomp.columns = ["bucket", "cuentas"]
-        dd = st.columns(2)
-        with dd[0]:
+        cc = st.columns([1, 2, 1])
+        with cc[1]:
             figC = px.pie(gcomp, names="bucket", values="cuentas", template=TPL, hole=0.55,
                           color="bucket", color_discrete_map={"0 a 1 hito": TEAL, "2 hitos": AMBAR, "3 o más hitos": CORAL})
-            figC.update_traces(textinfo="label+percent", textfont=dict(color="white", size=12), sort=False)
+            figC.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13), sort=False)
             figC.update_layout(title="Churn segun hitos sin completar", height=320, margin=dict(t=46, b=10), showlegend=False)
             st.plotly_chart(figC, use_container_width=True)
-        with dd[1]:
-            if HAY_SOPORTE and "usa_soporte" in chd2.columns and "friccion" in chd2.columns:
-                chd2["_exp"] = np.where(~chd2["usa_soporte"], "No uso soporte",
-                                        np.where(chd2["friccion"], "Soporte con friccion", "Soporte sin friccion"))
-                orden_exp = ["Soporte con friccion", "Soporte sin friccion", "No uso soporte"]
-                gs = chd2["_exp"].value_counts().reindex(orden_exp).reset_index()
-                gs.columns = ["grupo", "cuentas"]
-                figSc = px.pie(gs, names="grupo", values="cuentas", template=TPL, hole=0.55,
-                               color="grupo", color_discrete_map={"Soporte con friccion": CORAL, "Soporte sin friccion": TEAL, "No uso soporte": GRIS})
-                figSc.update_traces(textinfo="label+percent", textfont=dict(color="white", size=11), sort=False)
-                figSc.update_layout(title="Churn segun experiencia de soporte", height=320, margin=dict(t=46, b=10), showlegend=False)
-                st.plotly_chart(figSc, use_container_width=True)
-        st.caption(f"El {pct2:.0%} del churn dejó dos o más hitos sin completar. Mirando el soporte, solo una parte del churn "
-                   "tuvo una mala experiencia (friccion); el resto recibio buen soporte o ni lo uso, señal de que el contacto "
-                   "por si solo no es la causa, sino que el soporte falle.")
-
-        # De los que contactaron soporte, churn por friccion
-        if HAY_SOPORTE and "friccion" in d.columns and "usa_soporte" in d.columns:
-            st.markdown("###### De los que contactaron soporte, ¿quiénes se fueron?")
-            sop = d[d["usa_soporte"]]
-            gf = pd.DataFrame({
-                "grupo": ["Con friccion", "Sin friccion"],
-                "churn": [sop[sop["friccion"]][col_churn].mean() if sop["friccion"].any() else 0,
-                          sop[~sop["friccion"]][col_churn].mean() if (~sop["friccion"]).any() else 0],
-            })
-            figF = px.bar(gf, x="grupo", y="churn", template=TPL, text=gf["churn"].map("{:.0%}".format),
-                          color="grupo", color_discrete_map={"Con friccion": CORAL, "Sin friccion": TEAL})
-            figF.update_traces(textposition="outside", cliponaxis=False)
-            figF.update_layout(height=320, yaxis_tickformat=".0%", showlegend=False, margin=dict(t=10, b=10),
-                               yaxis_title="tasa de churn", xaxis_title="")
-            st.plotly_chart(figF, use_container_width=True)
-            st.caption("Entre los que contactaron soporte, los que tuvieron friccion (un ticket reabierto, sin resolver, "
-                       "derivado o negativo) churnean mas que los que tuvieron buena experiencia. No es contactar soporte "
-                       "lo que pesa, sino que el soporte falle.")
+        st.caption(f"El {pct2:.0%} del churn dejó dos o más hitos sin completar. El abandono se concentra en las cuentas "
+                   "que arrancaron mal, no en las que arrancaron bien.")
 
 
 
