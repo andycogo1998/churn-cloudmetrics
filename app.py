@@ -425,7 +425,7 @@ with T["General"]:
     estados_cfg = [
         ("Cuentas", None, GRIS, "", "Cuentas que se encuentran en el filtro actual."),
         ("Activas", "activo", TEAL, "\u25b2 ", "Cuentas que hoy siguen activas y pagando."),
-        ("Suspendidas", "suspendido", CORAL, "\u25bc ", "Cuentas cortadas, normalmente por falta de pago. Recuperables con cobranza."),
+        ("Suspendidas", "suspendido", CORAL, "\u25bc ", "Cuentas cortadas, normalmente por falta de pago. Recuperables con reactivación."),
         ("Inactivas", "inactivo", AMBAR, "\u25bc ", "Cuentas que dejaron de tener actividad sin darse de baja formal."),
         ("Canceladas", "cancelado", CORAL, "\u25bc ", "Bajas definitivas de la cuenta."),
     ]
@@ -1155,7 +1155,7 @@ with T["Calidad de datos"]:
 
     inconsistencias = [
         ("01_usuarios", "fecha_ultimo_pago anterior a fecha_registro", "80", "Error de carga", "Mantener; marcar con flag y reportar a origen"),
-        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a cobranza"),
+        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a Collection"),
         ("01_usuarios", "nombre_empresa con duplicados", "940 (378 unicos)", "No es error", "Usar siempre user_id como clave, nunca el nombre"),
         ("01_usuarios", "Posibles cuentas duplicadas (mismo nombre, pais, plan y segmento)", "135", "A validar", "Aislar para revision de negocio; no deduplicar"),
         ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Tratar como satisfaccion ordinal, no como NPS"),
