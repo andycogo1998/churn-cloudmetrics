@@ -34,10 +34,13 @@ def _gemini_key():
         return ""
 
 
-SYS_IA = ("Sos analista de Customer Experience de CloudMetrics, un SaaS de contabilidad e invoicing en Latinoamerica. "
-          "Te paso metricas de churn ya calculadas. Escribi en espanol, claro y directo, en 4 a 6 frases, sin titulos, "
-          "sin vinetas y sin markdown. Explica que esta pasando y cerra con una accion concreta para el equipo de "
-          "Customer Success. No inventes numeros: usa solo los que te doy.")
+SYS_IA = ("Sos analista senior de Customer Experience de CloudMetrics, un SaaS de contabilidad e invoicing en "
+          "Latinoamerica. Te paso los datos crudos que estan detras de los graficos de esta vista del dashboard. "
+          "Tu tarea es analizarlos y sacar tus propias observaciones: que se destaca, que patrones o anomalias "
+          "aparecen, que parece causa y que parece sintoma, y que conviene hacer. No repitas ni parafrasees un texto "
+          "dado; interpreta los numeros vos. Escribi en espanol, claro y directo, en 5 a 8 frases, sin titulos, sin "
+          "vinetas y sin markdown. Cerra con una o dos acciones concretas y priorizadas. Usa solo los numeros que te "
+          "paso; no inventes datos.")
 
 
 def analisis_ia(contexto):
@@ -46,7 +49,7 @@ def analisis_ia(contexto):
         return None, "No hay GEMINI_API_KEY configurada."
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={key}"
     body = {"contents": [{"parts": [{"text": SYS_IA + "\n\nDatos del corte actual:\n" + contexto}]}],
-            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 600}}
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 800}}
     try:
         r = requests.post(url, json=body, timeout=30)
     except Exception as e:
@@ -404,11 +407,18 @@ with T["General"]:
         f"<div style='font-size:0.78rem; font-weight:700; color:{_bordes[nivel]}; letter-spacing:.04em;'>DIAGNOSTICO DE LA BASE DE USUARIOS</div>"
         f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{cuerpo}</div></div>", unsafe_allow_html=True)
 
+    _est = d.groupby("estado_cuenta").agg(n=("user_id", "count"), mrr=("mrr", "sum"))
+    _tiers = act["fallas_activacion"].apply(lambda n: f"{int(n)}").value_counts().sort_index()
     bloque_ia("general", (
-        f"Vista: base de usuarios. Base activa {n_act:,} cuentas, MRR mensual ${mrr_act:,.0f}. "
-        f"Cuentas activas en riesgo (2 o mas de 4 hitos de activacion sin completar): {en_riesgo:,} ({pct_riesgo:.0%}). "
-        f"Los 4 hitos de activacion son: configurar empresa, primera factura, plan de cuentas, empleados. "
-        f"Anomalias detectadas: {('; '.join(alertas)) if alertas else 'ninguna'}."
+        "Vista: estado general de la base de usuarios (datos crudos detras de los graficos). "
+        f"Total {len(d)} cuentas. Por estado de cuenta: " +
+        "; ".join(f"{k} {int(r.n)} cuentas (${r.mrr:,.0f} MRR)" for k, r in _est.iterrows()) + ". "
+        f"Base activa {n_act} cuentas, MRR ${mrr_act:,.0f}. "
+        "Distribucion de la base activa por hitos de activacion sin completar (de 4): " +
+        "; ".join(f"{k} hitos: {int(v)} cuentas" for k, v in _tiers.items()) + ". "
+        f"Cuentas activas en riesgo (2 o mas hitos sin completar): {en_riesgo} ({pct_riesgo:.0%}). "
+        "Anomalias por pais, plan o soporte detectadas por reglas: " +
+        ("; ".join(alertas) if alertas else "ninguna") + "."
     ))
 
     # ---- Tarjetas por estado, cada una con su MRR ----
@@ -552,6 +562,23 @@ with T["General"]:
 # ---------------- Churn ----------------
 with T["Churn"]:
     PALETA = [TEAL, CORAL, AMBAR, NAVY, GRIS, TEAL_OSCURO, AZUL]
+
+    _seg = d[d[col_churn]]["segmento"].value_counts(normalize=True)
+    _cp = churn_por(d, "plan").set_index("plan")["tasa"]
+    _cpa = churn_por(d, "pais").set_index("pais")["tasa"]
+    _noact = d[d.estado_cuenta != "activo"]
+    _byest = _noact.groupby("estado_cuenta").agg(n=("user_id", "count"), mrr=("mrr", "sum"))
+    _ficha = int(_noact["churn_retiro"].sum()) if "churn_retiro" in d.columns else 0
+    bloque_ia("churn", (
+        "Vista: donde se concentra el churn (datos crudos detras de los graficos). "
+        f"Churn general {d[col_churn].mean():.0%} ({int(d[col_churn].sum())} cuentas), MRR perdido ${d[d[col_churn]].mrr.sum():,.0f} por mes. "
+        "Cuentas no activas por estado: " + "; ".join(f"{k} {int(r.n)} (${r.mrr:,.0f})" for k, r in _byest.iterrows()) + ". "
+        f"De esas bajas, solo {_ficha} dejaron ficha de retiro con motivo registrado. "
+        "Composicion del churn por segmento: " + "; ".join(f"{k} {v:.0%}" for k, v in _seg.items()) + ". "
+        "Tasa de churn por plan: " + "; ".join(f"{k} {v:.0%}" for k, v in _cp.items()) + ". "
+        "Tasa de churn por pais: " + "; ".join(f"{k} {v:.0%}" for k, v in _cpa.items()) + "."
+    ))
+    st.markdown("---")
 
     # --- Donde se concentra el churn ---
     st.subheader("Donde se concentra el churn")
@@ -741,6 +768,21 @@ with T["Negocio"]:
         k[3].metric("Usuarios adicionales", f"{ua:.1f}", delta_color="off",
                     help="Promedio de usuarios extra por cuenta activa. Proxy de expansion dentro de la cuenta.")
 
+    _mseg = act.groupby("segmento").mrr.sum()
+    _mplan = act.groupby("plan").mrr.sum()
+    _ses = pd.to_numeric(act["sesiones_promedio_semana"], errors="coerce").mean() if "sesiones_promedio_semana" in act.columns else float("nan")
+    _mods = {l: c for l, c in [("nomina", "modulo_nomina_activo"), ("inventario", "modulo_inventario_activo"),
+                               ("cxc", "modulo_cxc_activo"), ("banco", "integracion_banco_conectada")] if c in act.columns}
+    _adop = {l: act[c].fillna("").str.lower().eq("si").mean() for l, c in _mods.items()}
+    bloque_ia("negocio", (
+        "Vista: metricas de negocio, solo cuentas activas (datos crudos detras de los graficos). "
+        f"Base activa {n_act} cuentas, MRR activo ${act.mrr.sum():,.0f}, ARPU ${(act.mrr.mean() if n_act else 0):,.1f}, "
+        f"sesiones por semana promedio {_ses:.1f}. "
+        "MRR por segmento: " + "; ".join(f"{k} ${v:,.0f}" for k, v in _mseg.items()) + ". "
+        "MRR por plan: " + "; ".join(f"{k} ${v:,.0f}" for k, v in _mplan.items()) + ". "
+        "Adopcion de modulos en la base activa: " + "; ".join(f"{l} {v:.0%}" for l, v in _adop.items()) + "."
+    ))
+
     st.markdown("---")
 
     # --- MRR por plan y por segmento (solo activas) ---
@@ -824,11 +866,26 @@ with T["Causa raiz"]:
         f"<div style='font-size:0.78rem; font-weight:700; color:{TEAL}; letter-spacing:.04em;'>LA CAUSA RAÍZ DEL CHURN</div>"
         f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{diag}</div></div>", unsafe_allow_html=True)
 
+    _esc = d.groupby("fallas_activacion").agg(n=("user_id", "count"), ch=(col_churn, "mean"))
+    _eff = {}
+    for lbl, c in [("Configurar empresa", "configuracion_empresa_completa"),
+                   ("Plan de cuentas", "plan_cuentas_configurado"), ("Empleados", "empleados_cargados")]:
+        if c in d.columns:
+            m = ~d[c].fillna("").str.lower().eq("si")
+            _eff[lbl] = (d[m][col_churn].mean(), d[~m][col_churn].mean())
+    _fm = pd.to_numeric(d["facturas_emitidas_mes1"], errors="coerce").fillna(0).eq(0)
+    _eff["Primera factura"] = (d[_fm][col_churn].mean(), d[~_fm][col_churn].mean())
+    _perf = {c: churn_por(d, c).set_index(c)["tasa"] for c in ["segmento", "plan", "pais", "metodo_pago"] if c in d.columns}
     bloque_ia("causa", (
-        f"Vista: causa raiz del churn. La causa raiz es la activacion incompleta, medida con 4 hitos: configurar "
-        f"empresa, primera factura, plan de cuentas y empleados. Una cuenta que completa los 4 churnea {ch0:.0%}; "
-        f"una que no completa ninguno, {chmax:.0%}. El {pct2:.0%} del churn son cuentas que dejaron 2 o mas hitos sin "
-        f"completar. El perfil del cliente (segmento, plan, pais) casi no influye en el churn."
+        "Vista: causa raiz del churn (datos crudos detras de los graficos). "
+        f"Churn base {d[col_churn].mean():.0%}. "
+        "Escalera por cantidad de hitos de activacion sin completar (de 4), con tasa de churn y numero de cuentas: " +
+        "; ".join(f"{int(k)} hitos: {r.ch:.0%} ({int(r.n)} cuentas)" for k, r in _esc.iterrows()) + ". "
+        f"El {pct2:.0%} del churn dejo 2 o mas hitos sin completar. "
+        "Efecto de cada hito (churn si el hito falla vs si esta ok): " +
+        "; ".join(f"{l} {f:.0%} vs {o:.0%}" for l, (f, o) in _eff.items()) + ". "
+        "Tasa de churn por caracteristica del cliente (deberia ser plana si el perfil no influye): " +
+        "; ".join(f"{c} (" + ", ".join(f"{k} {v:.0%}" for k, v in s.items()) + ")" for c, s in _perf.items()) + "."
     ))
 
     # --- 1. Uso del producto vs los retiros ---
@@ -971,6 +1028,22 @@ with T["Soporte"]:
                     "Friccion = la cuenta tuvo alguna mala experiencia de soporte: un ticket reabierto o sin resolver, una conversacion derivada o con sentimiento negativo, o una llamada escalada.")
         tarjeta_kpi(cov[3], "Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", f"+{(churn_fric - churn_sin) * 100:.0f} pp con friccion",
                     "Tasa de churn de las cuentas con friccion frente a las que no la tuvieron. La friccion se asocia al churn, no el volumen de tickets.")
+
+        _sig = []
+        for lbl, c in [("ticket reabierto", "chat_reaperturas"), ("ticket sin resolver", "chat_no_resueltos"),
+                       ("conversacion negativa", "wa_negativos"), ("llamada escalada", "tel_escalo")]:
+            if c in d.columns:
+                _m = pd.to_numeric(d[c], errors="coerce").fillna(0) > 0
+                if _m.any():
+                    _sig.append(f"{lbl}: churn {d[_m][col_churn].mean():.0%} (n={int(_m.sum())})")
+        bloque_ia("soporte", (
+            "Vista: soporte (datos crudos detras de los graficos). "
+            f"{d['usa_soporte'].mean():.0%} de la base uso soporte, {int(d['tickets_total'].sum())} tickets totales, "
+            f"{(d['tickets_total'].sum() / con_ticket if con_ticket else 0):.1f} por cuenta atendida. "
+            f"Cuentas con friccion (alguna mala experiencia de soporte): {int(d['friccion'].sum())} ({d['friccion'].mean():.0%}). "
+            f"Churn con friccion {churn_fric:.0%} vs churn sin friccion {churn_sin:.0%} (churn base {d[col_churn].mean():.0%}). "
+            + ("Churn por tipo de falla de soporte: " + "; ".join(_sig) + "." if _sig else "")
+        ))
 
         st.markdown("---")
         st.subheader("Analisis por canal de soporte")
