@@ -294,7 +294,7 @@ bajas_con_ficha = (d["churn_retiro"].sum() / churned) if churned else 0
 
 st.markdown("---")
 
-nombres_tabs = ["General", "Churn", "Negocio", "Causa raiz", "Soporte", "Calidad de datos"]
+nombres_tabs = ["General", "Negocio", "Churn", "Soporte", "Causa raiz", "Calidad de datos"]
 tabs = st.tabs(nombres_tabs)
 T = dict(zip(nombres_tabs, tabs))
 
@@ -303,6 +303,15 @@ def churn_por(data, col):
     g = data.groupby(col).agg(cuentas=("user_id", "count"), churn=(col_churn, "sum")).reset_index()
     g["tasa"] = g["churn"] / g["cuentas"]
     return g.sort_values("tasa", ascending=False)
+
+
+def tarjeta_kpi(col, lbl, valor, sub, ayuda=""):
+    col.markdown(
+        f'<div title="{ayuda}" style="background:#fff;border:1px solid #eef1f4;border-radius:12px;'
+        f'padding:14px 8px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.03);">'
+        f'<div style="font-size:0.8rem;color:#7b8794;">{lbl}</div>'
+        f'<div style="font-size:1.7rem;font-weight:700;color:{NAVY};line-height:1.25;">{valor}</div>'
+        f'<div style="font-size:0.82rem;font-weight:600;color:{GRIS};">{sub}</div></div>', unsafe_allow_html=True)
 
 
 # ---------------- General ----------------
@@ -327,19 +336,17 @@ with T["General"]:
             alertas.append(f"La friccion de soporte en la base activa es alta ({act['friccion'].mean():.0%} tuvo alguna mala experiencia), un acelerador conocido del churn.")
     nivel = "ok" if pct_riesgo < 0.20 else ("warn" if pct_riesgo < 0.35 else "bad")
     _bordes = {"ok": TEAL, "warn": AMBAR, "bad": CORAL}
-    cuerpo = (f"<b>La base activa es de {n_act:,} cuentas con MRR ${mrr_act:,.0f}.</b> "
-              f"{en_riesgo:,} de ellas ({pct_riesgo:.0%}) estan en arranque parcial o critico, los dos niveles mas bajos "
-              f"del termometro, es decir con dos o mas de los cinco "
-              f"pasos clave de arranque sin completar (configurar la empresa, emitir la primera factura, cargar el "
-              f"plan de cuentas, cargar empleados y activar cuentas por cobrar), "
-              f"que es el grupo con mas riesgo de churn.")
-    if alertas:
-        cuerpo += "<br><b>Anomalias detectadas:</b><ul style='margin:4px 0 0 0; padding-left:18px;'>" + "".join(f"<li>{a}</li>" for a in alertas) + "</ul>"
-    else:
-        cuerpo += "<br>No se detectaron anomalias por pais, plan ni soporte en este corte."
+    items = [
+        f"La base activa es de <b>{n_act:,} cuentas</b> con un MRR de <b>${mrr_act:,.0f}</b>.",
+        f"<b>{en_riesgo:,} de ellas ({pct_riesgo:.0%})</b> estan en arranque parcial o critico, es decir con dos o mas "
+        f"de los cinco pasos clave de arranque sin completar (configurar la empresa, emitir la primera factura, cargar "
+        f"el plan de cuentas, cargar empleados y activar cuentas por cobrar). Es el grupo con mas riesgo de churn.",
+    ]
+    items += alertas if alertas else ["No se detectaron anomalias por pais, plan ni soporte en este corte."]
+    cuerpo = "<ul style='margin:8px 0 0 0; padding-left:18px;'>" + "".join(f"<li style='margin-bottom:6px;'>{x}</li>" for x in items) + "</ul>"
     st.markdown(
         f"<div style='background:#f6fafa; border-left:4px solid {_bordes[nivel]}; border-radius:8px; padding:12px 16px; margin-bottom:6px;'>"
-        f"<div style='font-size:0.78rem; font-weight:700; color:{_bordes[nivel]}; letter-spacing:.04em;'>DIAGNOSTICO AUTOMATICO DE LA BASE ACTIVA</div>"
+        f"<div style='font-size:0.78rem; font-weight:700; color:{_bordes[nivel]}; letter-spacing:.04em;'>DIAGNOSTICO DE LA BASE DE USUARIOS</div>"
         f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{cuerpo}</div></div>", unsafe_allow_html=True)
 
     # ---- Tarjetas por estado, cada una con su MRR ----
@@ -416,12 +423,10 @@ with T["General"]:
 
     st.markdown("---")
 
-    # ---- Termometro de arranque de la base activa ----
-    st.subheader("Termometro de arranque de la base activa")
-    st.caption("A cada cuenta activa le damos un puntaje de arranque segun cuantos pasos clave del onboarding "
-               "completo: configurar la empresa, emitir la primera factura, cargar el plan de cuentas, cargar "
-               "empleados y activar cuentas por cobrar. Cuanto peor arranca una cuenta, mas chances tiene de "
-               "terminar yendose. Este grafico muestra como esta hoy la base activa segun ese arranque.")
+    # ---- Hitos de activacion ----
+    st.subheader("Hitos de activacion")
+    st.caption("Cuantos de los cinco hitos de activacion completo cada cuenta activa: configurar la empresa, emitir la "
+               "primera factura, cargar el plan de cuentas, cargar empleados y activar cuentas por cobrar.")
     def _tier(n):
         return "Arranque completo" if n == 0 else "Buen arranque" if n == 1 else "Arranque parcial" if n == 2 else "Arranque critico"
     sa = act.copy()
@@ -439,13 +444,11 @@ with T["General"]:
     st.plotly_chart(fig, use_container_width=True)
     st.markdown(
         f"<div style='font-size:0.85rem; color:{NAVY}; line-height:1.7;'>"
-        f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 5 pasos. &nbsp;|&nbsp; "
+        f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 5 hitos. &nbsp;|&nbsp; "
         f"<b style='color:#5FBDB3;'>Buen arranque</b>: 4 de 5, le falta 1. &nbsp;|&nbsp; "
         f"<b style='color:{AMBAR};'>Arranque parcial</b>: 3 de 5, le faltan 2. &nbsp;|&nbsp; "
         f"<b style='color:{CORAL};'>Arranque critico</b>: 2 o menos, le faltan 3 o mas."
         f"</div>", unsafe_allow_html=True)
-    flojo = int((sa["fallas_activacion"] >= 2).sum())
-    st.caption(f"{flojo:,} cuentas activas estan en arranque parcial o critico. Son las que conviene acompanar con onboarding antes de que se vayan.")
 
 
 
@@ -485,12 +488,12 @@ with T["Churn"]:
     con_ficha = int(no_act["churn_retiro"].sum())
     mrr_total = d.mrr.sum()
     mt = st.columns(3)
-    mt[0].metric("Cuentas en churn", f"{n_no:,}", f"{(n_no/len(d) if len(d) else 0):.0%} de la base", delta_color="off",
-                 help="Cuentas en estado distinto de activo dentro del filtro.")
-    mt[1].metric("MRR perdido / mes", f"${no_act.mrr.sum():,.0f}", f"{(no_act.mrr.sum()/mrr_total if mrr_total else 0):.0%} del MRR", delta_color="off",
-                 help="Ingreso recurrente mensual de las cuentas que ya no estan activas.")
-    mt[2].metric("Con ficha de retiro", f"{con_ficha:,}", f"{(con_ficha/n_no if n_no else 0):.0%} del churn", delta_color="off",
-                 help="Cuantas de esas bajas dejaron un registro formal con el motivo.")
+    tarjeta_kpi(mt[0], "Cuentas en churn", f"{n_no:,}", f"{(n_no/len(d) if len(d) else 0):.0%} de la base",
+                "Cuentas en estado distinto de activo dentro del filtro.")
+    tarjeta_kpi(mt[1], "MRR perdido / mes", f"${no_act.mrr.sum():,.0f}", f"{(no_act.mrr.sum()/mrr_total if mrr_total else 0):.0%} del MRR",
+                "Ingreso recurrente mensual de las cuentas que ya no estan activas.")
+    tarjeta_kpi(mt[2], "Con ficha de retiro", f"{con_ficha:,}", f"{(con_ficha/n_no if n_no else 0):.0%} del churn",
+                "Cuantas de esas bajas dejaron un registro formal con el motivo.")
     cc1, cc2 = st.columns(2)
     cmap_estado = {"suspendido": AMBAR, "inactivo": GRIS, "cancelado": CORAL}
     with cc1:
@@ -665,10 +668,8 @@ with T["Negocio"]:
 
     st.markdown("---")
 
-    # --- Completitud de hitos y adopcion de modulos (cuentas activas) ---
-    st.markdown("##### Completitud de hitos y adopcion de modulos")
-    st.caption("Que porcentaje de las cuentas activas completo cada hito de arranque y activo cada modulo. "
-               "En verde lo que se completo, en rojo lo que falta. Ordenado de mayor a menor adopcion.")
+    # --- Hitos y adopcion de modulos (cuentas activas) ---
+    st.markdown("##### Hitos y adopcion de modulos")
     def pct_si(col):
         return act[col].fillna("").str.lower().eq("si").mean() if col in act.columns else None
     hitos = []
@@ -699,9 +700,6 @@ with T["Negocio"]:
                           yaxis_title="", xaxis_title="", legend_title="",
                           legend=dict(orientation="h", y=1.08, x=0), yaxis=dict(automargin=True))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Los hitos de arranque (configurar empresa, primera factura, plan de cuentas) tienen alta adopcion; "
-                   "los modulos de nicho como nomina e inventario, mucho menor. Esa diferencia es la que separa una "
-                   "cuenta bien activada de una que apenas usa el producto.")
 
 
 
@@ -789,7 +787,7 @@ with T["Causa raiz"]:
                 "reciente. Una **causa** ocurre temprano y se puede accionar, como completar la activación.")
 
     # --- 4. El bloque que explica: la activacion ---
-    st.markdown("##### 4. El bloque que sí explica: la activación")
+    st.markdown("##### 4. El bloque que sí explica el churn: la activación")
     senales5 = [("configuracion_empresa_completa", "Configuración de empresa"),
                 ("plan_cuentas_configurado", "Plan de cuentas"),
                 ("empleados_cargados", "Empleados cargados"),
@@ -860,16 +858,16 @@ with T["Soporte"]:
         con_ticket = int(d['usa_soporte'].sum())
         tickets_tot = int(d['tickets_total'].sum())
         tpc = (tickets_tot / con_ticket) if con_ticket else 0
-        cov[0].metric("Cuentas con algun ticket", f"{con_ticket:,}", f"{d['usa_soporte'].mean():.0%} de la base", delta_color="off",
-                      help="Cuentas que abrieron al menos un ticket en cualquier canal (chat, whatsapp o telefono).")
-        cov[1].metric("Tickets totales", f"{tickets_tot:,}", f"{tpc:.1f} por cuenta atendida", delta_color="off",
-                      help="Suma de tickets de los tres canales dentro del filtro actual.")
-        cov[2].metric("Cuentas con friccion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%} de la base", delta_color="off",
-                      help="Friccion = la cuenta tuvo alguna mala experiencia de soporte: un ticket reabierto o sin resolver, una conversacion derivada o con sentimiento negativo, o una llamada escalada.")
         churn_fric = d[d['friccion']][col_churn].mean() if d['friccion'].any() else 0
         churn_sin = d[~d['friccion']][col_churn].mean() if (~d['friccion']).any() else 0
-        cov[3].metric("Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", f"+{(churn_fric - churn_sin) * 100:.0f} pp con friccion", delta_color="off",
-                      help="Tasa de churn de las cuentas con friccion frente a las que no la tuvieron. La friccion se asocia al churn, no el volumen de tickets.")
+        tarjeta_kpi(cov[0], "Cuentas con algun ticket", f"{con_ticket:,}", f"{d['usa_soporte'].mean():.0%} de la base",
+                    "Cuentas que abrieron al menos un ticket en cualquier canal (chat, whatsapp o telefono).")
+        tarjeta_kpi(cov[1], "Tickets totales", f"{tickets_tot:,}", f"{tpc:.1f} por cuenta atendida",
+                    "Suma de tickets de los tres canales dentro del filtro actual.")
+        tarjeta_kpi(cov[2], "Cuentas con friccion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%} de la base",
+                    "Friccion = la cuenta tuvo alguna mala experiencia de soporte: un ticket reabierto o sin resolver, una conversacion derivada o con sentimiento negativo, o una llamada escalada.")
+        tarjeta_kpi(cov[3], "Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", f"+{(churn_fric - churn_sin) * 100:.0f} pp con friccion",
+                    "Tasa de churn de las cuentas con friccion frente a las que no la tuvieron. La friccion se asocia al churn, no el volumen de tickets.")
 
         st.markdown("---")
         st.subheader("Analisis por canal de soporte")
@@ -978,41 +976,24 @@ with T["Soporte"]:
 # ---------------- Calidad de datos ----------------
 with T["Calidad de datos"]:
     st.subheader("Panel de calidad de datos")
-    st.caption("Tres barridos: exploracion manual, revision con IA. No se borra ninguna fila; "
-               "cada inconsistencia se marca y se decide su uso. La tabla lista todas las que encontramos.")
-
-    # Highlights de cobertura del dato
-    no_act_mask = d.estado_cuenta != "activo"
-    n_churn = int(no_act_mask.sum())
-    n_ficha = int((no_act_mask & d["churn_retiro"]).sum())
-    mrr_sin = d.loc[no_act_mask & ~d["churn_retiro"], "mrr"].sum()
-    h = st.columns(3)
-    h[0].metric("Bajas sin ficha de retiro", f"{n_churn - n_ficha:,}", f"{((n_churn - n_ficha) / n_churn if n_churn else 0):.0%} del churn", delta_color="off",
-                help="Cuentas en churn por estado de cuenta que no dejaron un registro formal con el motivo de baja.")
-    h[1].metric("MRR sin motivo registrado", f"${mrr_sin:,.0f}", delta_color="off",
-                help="Ingreso recurrente de las bajas que no tienen ficha de retiro: churn que no podemos explicar con la fuente de retiros.")
-    h[2].metric("Inconsistencias documentadas", "16", delta_color="off",
-                help="Total de hallazgos de la revision de calidad, en las seis fuentes.")
-
-    st.markdown("---")
 
     inconsistencias = [
         ("01_usuarios", "fecha_ultimo_pago anterior a fecha_registro", "80", "Error de carga", "Mantener; marcar con flag y reportar a origen"),
-        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a collection"),
+        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a cobranza"),
         ("01_usuarios", "nombre_empresa con duplicados", "940 (378 unicos)", "No es error", "Usar siempre user_id como clave, nunca el nombre"),
         ("01_usuarios", "Posibles cuentas duplicadas (mismo nombre, pais, plan y segmento)", "135", "A validar", "Aislar para revision de negocio; no deduplicar"),
-        ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Escalar con el equipo responsable"),
+        ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Tratar como satisfaccion ordinal, no como NPS"),
         ("02_retiros", "motivo_secundario mayormente vacio", "97", "Campo opcional", "Usar solo cuando esta presente"),
         ("02_retiros", "comentario_libre parcialmente vacio", "51", "Campo opcional", "Usar solo los presentes para analisis de texto"),
         ("03_uso_producto", "primer_factura_emitida = no pero facturas_mes1 > 0", "203", "Contradiccion", "Usar facturas_mes1 > 0 como verdad de activacion"),
         ("03_uso_producto", "Facturo sin configuracion de empresa completa", "196", "A validar", "Marcar y escalar a producto; no asumir prerrequisito"),
         ("03_uso_producto", "login_30 en desacuerdo con sesiones_promedio_semana", "222 / 45", "No es contradiccion", "Miden ventanas distintas; usar cada una para su fin"),
-        ("03_uso_producto", "dias_primer_factura vacio", "305", "A validar", "Usar solo donde primera factura = si"),
-        ("03_uso_producto", "Faltantes en facturas_mes3 y reportes_mes3", "77 / 226", "A validar", "Validar con el equipo de producto/data"),
+        ("03_uso_producto", "dias_primer_factura vacio", "305", "Coherente con el flag", "Usar solo donde primera factura = si"),
+        ("03_uso_producto", "Faltantes en facturas_mes3 y reportes_mes3", "77 / 226", "Faltante menor", "Usar con cautela"),
         ("04a_soporte_chat", "tiempo_resolucion_hs cargado en tickets no resueltos", "393", "A validar", "Confirmar si mide resolucion o gestion del ticket"),
         ("04b_soporte_whatsapp", "resuelto_en_conversacion = si y deriva_a_agente = si", "106", "Contradiccion", "Indagar el flujo con el equipo"),
         ("04c_soporte_telefono", "nps_post_llamada nulo", "70", "Faltante", "Revisar la carga con el equipo"),
-        ("04c_soporte_telefono", "escalo_a_especialista = si pero motivo_escala vacio", "22", "A validar", "No afecta el analisis; completar en origen"),
+        ("04c_soporte_telefono", "escalo_a_especialista = si pero motivo_escala vacio", "22", "Incompletitud", "No afecta el analisis; completar en origen"),
     ]
     tab = pd.DataFrame(inconsistencias, columns=["Archivo", "Inconsistencia", "Registros", "Veredicto", "Decision"])
     st.dataframe(tab, hide_index=True, use_container_width=True,
@@ -1023,5 +1004,3 @@ with T["Calidad de datos"]:
                      "Veredicto": st.column_config.TextColumn(width="small"),
                      "Decision": st.column_config.TextColumn(width="large"),
                  })
-    st.caption("Veredicto: error de carga, contradiccion entre columnas, a validar con el negocio, campo opcional, "
-               "faltante o no es error. El criterio fue no borrar nada y dejar registrada la decision de cada hallazgo.")
