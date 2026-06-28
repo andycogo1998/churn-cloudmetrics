@@ -718,10 +718,10 @@ with T["Causa raiz"]:
     chmax = d[d["fallas_activacion"] == d["fallas_activacion"].max()][col_churn].mean()
     chd = d[d[col_churn]]
     pct2 = (chd["fallas_activacion"] >= 2).mean() if len(chd) else 0
-    diag = (f"<b>La causa raíz del churn es una activación incompleta.</b> Las cuentas que no completan los primeros "
+    diag = (f"<b>La causa raíz del churn es una activación incompleta de las características y funcionalidades de la app.</b> Las cuentas que no completan los primeros "
             f"pasos de configuración del producto (configurar la empresa, emitir la primera factura, cargar el plan de "
             f"cuentas, cargar empleados y activar cuentas por cobrar) se van mucho más. Una cuenta que completa los cinco "
-            f"pasos churnea cerca del {ch0:.0%}; una que no completa ninguno, cerca del {chmax:.0%}. De hecho, el "
+            f"pasos tiene un churn cercano al {ch0:.0%}; una que no completa ninguno, cercano al {chmax:.0%}. De hecho, el "
             f"<b>{pct2:.0%} del churn</b> son cuentas que dejaron dos o más de esos pasos sin completar. En cambio, las "
             f"características del cliente como segmento, plan o país casi no influyen.")
     st.markdown(
@@ -857,13 +857,19 @@ with T["Soporte"]:
         st.caption("Cuanto del churn pasa por soporte y, sobre todo, si el soporte funciono. La friccion (ticket reabierto, "
                    "sin resolver, escalado o con sentimiento negativo) es lo que se asocia al churn, no el volumen.")
         cov = st.columns(4)
-        cov[0].metric("Cuentas con algun ticket", f"{int(d['usa_soporte'].sum()):,}", f"{d['usa_soporte'].mean():.0%} de la base", delta_color="off")
-        cov[1].metric("Tickets totales", f"{int(d['tickets_total'].sum()):,}", delta_color="off")
-        cov[2].metric("Cuentas con friccion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%} de la base", delta_color="off")
+        con_ticket = int(d['usa_soporte'].sum())
+        tickets_tot = int(d['tickets_total'].sum())
+        tpc = (tickets_tot / con_ticket) if con_ticket else 0
+        cov[0].metric("Cuentas con algun ticket", f"{con_ticket:,}", f"{d['usa_soporte'].mean():.0%} de la base", delta_color="off",
+                      help="Cuentas que abrieron al menos un ticket en cualquier canal (chat, whatsapp o telefono).")
+        cov[1].metric("Tickets totales", f"{tickets_tot:,}", f"{tpc:.1f} por cuenta atendida", delta_color="off",
+                      help="Suma de tickets de los tres canales dentro del filtro actual.")
+        cov[2].metric("Cuentas con friccion", f"{int(d['friccion'].sum()):,}", f"{d['friccion'].mean():.0%} de la base", delta_color="off",
+                      help="Friccion = la cuenta tuvo alguna mala experiencia de soporte: un ticket reabierto o sin resolver, una conversacion derivada o con sentimiento negativo, o una llamada escalada.")
         churn_fric = d[d['friccion']][col_churn].mean() if d['friccion'].any() else 0
         churn_sin = d[~d['friccion']][col_churn].mean() if (~d['friccion']).any() else 0
-        cov[3].metric("Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", delta_color="off",
-                      help="Tasa de churn de las cuentas que tuvieron alguna mala experiencia de soporte frente a las que no.")
+        cov[3].metric("Churn con friccion vs sin", f"{churn_fric:.0%} vs {churn_sin:.0%}", f"+{(churn_fric - churn_sin) * 100:.0f} pp con friccion", delta_color="off",
+                      help="Tasa de churn de las cuentas con friccion frente a las que no la tuvieron. La friccion se asocia al churn, no el volumen de tickets.")
 
         st.markdown("---")
         st.subheader("Analisis por canal de soporte")
@@ -881,7 +887,7 @@ with T["Soporte"]:
             m2[0].metric("Cuentas atendidas", f"{c['user_id'].nunique():,}")
             m2[1].metric("Tickets por cuenta", f"{len(c)/c['user_id'].nunique():.1f}")
             m2[2].metric("CSAT activas vs churn", f"{c[c._churn==False].csat_score.mean():.2f} vs {c[c._churn==True].csat_score.mean():.2f}",
-                         help="CSAT promedio de tickets de cuentas hoy activas frente a las que ya churnearon.")
+                         help="CSAT promedio de tickets de cuentas hoy activas frente a las que ya hicieron churn.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Tickets por tema")
@@ -916,7 +922,7 @@ with T["Soporte"]:
             neg_act = (c[c._churn==False].sentimiento_usuario=='negativo').mean()
             neg_chu = (c[c._churn==True].sentimiento_usuario=='negativo').mean()
             m2[2].metric("Negativo activas vs churn", f"{neg_act:.0%} vs {neg_chu:.0%}",
-                         help="Porcentaje de tickets con sentimiento negativo, en cuentas activas frente a las que churnearon.")
+                         help="Porcentaje de tickets con sentimiento negativo, en cuentas activas frente a las que hicieron churn.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Sentimiento del usuario")
@@ -949,7 +955,7 @@ with T["Soporte"]:
             m2[0].metric("Cuentas atendidas", f"{c['user_id'].nunique():,}")
             m2[1].metric("Llamadas por cuenta", f"{len(c)/c['user_id'].nunique():.1f}")
             m2[2].metric("NPS activas vs churn", f"{c[c._churn==False].nps_post_llamada.mean():.2f} vs {c[c._churn==True].nps_post_llamada.mean():.2f}",
-                         help="NPS post llamada de cuentas activas frente a las que churnearon.")
+                         help="NPS post llamada de cuentas activas frente a las que hicieron churn.")
             c1, c2 = st.columns(2)
             with c1:
                 st.caption("Llamadas por tema")
@@ -972,30 +978,50 @@ with T["Soporte"]:
 # ---------------- Calidad de datos ----------------
 with T["Calidad de datos"]:
     st.subheader("Panel de calidad de datos")
-    st.caption("Inconsistencias detectadas. No se borran filas: se marcan y se decide su uso.")
-    flags = [
-        ("flag_estado_sin_retiro", "Cuenta no activa sin registro de retiro", "estado_cuenta como verdad de churn"),
-        ("flag_activacion_contradice", "Marca no facturo pero tiene facturas mes 1", "Activacion desde facturas_mes1 > 0"),
-        ("flag_fecha_invertida", "Ultimo pago anterior al registro", "Excluir de antiguedad y recencia"),
-        ("flag_retiro_fecha_invertida", "Fecha de retiro anterior al ultimo pago", "No usar para recencia"),
-        ("flag_login_no_activo", "Login reciente en cuenta no activa", "No usar login_30 como actividad"),
-        ("flag_pago_geo", "Metodo de pago geograficamente imposible", "No usar metodo_pago por pais"),
+    st.caption("Tres barridos: exploracion manual, revision con IA y analisis de distribucion. No se borra ninguna fila; "
+               "cada inconsistencia se marca y se decide su uso. La tabla lista todas las que encontramos.")
+
+    # Highlights de cobertura del dato
+    no_act_mask = d.estado_cuenta != "activo"
+    n_churn = int(no_act_mask.sum())
+    n_ficha = int((no_act_mask & d["churn_retiro"]).sum())
+    mrr_sin = d.loc[no_act_mask & ~d["churn_retiro"], "mrr"].sum()
+    h = st.columns(3)
+    h[0].metric("Bajas sin ficha de retiro", f"{n_churn - n_ficha:,}", f"{((n_churn - n_ficha) / n_churn if n_churn else 0):.0%} del churn", delta_color="off",
+                help="Cuentas en churn por estado de cuenta que no dejaron un registro formal con el motivo de baja.")
+    h[1].metric("MRR sin motivo registrado", f"${mrr_sin:,.0f}", delta_color="off",
+                help="Ingreso recurrente de las bajas que no tienen ficha de retiro: churn que no podemos explicar con la fuente de retiros.")
+    h[2].metric("Inconsistencias documentadas", "16", delta_color="off",
+                help="Total de hallazgos de la revision de calidad, en las seis fuentes.")
+
+    st.markdown("---")
+
+    inconsistencias = [
+        ("01_usuarios", "fecha_ultimo_pago anterior a fecha_registro", "80", "Error de carga", "Mantener; marcar con flag y reportar a origen"),
+        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a cobranza"),
+        ("01_usuarios", "nombre_empresa con duplicados", "940 (378 unicos)", "No es error", "Usar siempre user_id como clave, nunca el nombre"),
+        ("01_usuarios", "Posibles cuentas duplicadas (mismo nombre, pais, plan y segmento)", "135", "A validar", "Aislar para revision de negocio; no deduplicar"),
+        ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Tratar como satisfaccion ordinal, no como NPS"),
+        ("02_retiros", "motivo_secundario mayormente vacio", "97", "Campo opcional", "Usar solo cuando esta presente"),
+        ("02_retiros", "comentario_libre parcialmente vacio", "51", "Campo opcional", "Usar solo los presentes para analisis de texto"),
+        ("03_uso_producto", "primer_factura_emitida = no pero facturas_mes1 > 0", "203", "Contradiccion", "Usar facturas_mes1 > 0 como verdad de activacion"),
+        ("03_uso_producto", "Facturo sin configuracion de empresa completa", "196", "A validar", "Marcar y escalar a producto; no asumir prerrequisito"),
+        ("03_uso_producto", "login_30 en desacuerdo con sesiones_promedio_semana", "222 / 45", "No es contradiccion", "Miden ventanas distintas; usar cada una para su fin"),
+        ("03_uso_producto", "dias_primer_factura vacio", "305", "Coherente con el flag", "Usar solo donde primera factura = si"),
+        ("03_uso_producto", "Faltantes en facturas_mes3 y reportes_mes3", "77 / 226", "Faltante menor", "Usar con cautela"),
+        ("04a_soporte_chat", "tiempo_resolucion_hs cargado en tickets no resueltos", "393", "A validar", "Confirmar si mide resolucion o gestion del ticket"),
+        ("04b_soporte_whatsapp", "resuelto_en_conversacion = si y deriva_a_agente = si", "106", "Contradiccion", "Indagar el flujo con el equipo"),
+        ("04c_soporte_telefono", "nps_post_llamada nulo", "70", "Faltante", "Revisar la carga con el equipo"),
+        ("04c_soporte_telefono", "escalo_a_especialista = si pero motivo_escala vacio", "22", "Incompletitud", "No afecta el analisis; completar en origen"),
     ]
-    filas = []
-    for col, desc, acc in flags:
-        if col in d.columns:
-            n = int(d[col].sum())
-            filas.append({"Hallazgo": desc, "Cuentas afectadas": n, "% del filtro": f"{(n/len(d) if len(d) else 0):.1%}", "Decision": acc})
-    reg = pd.DataFrame(filas).sort_values("Cuentas afectadas", ascending=False)
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        fig = px.bar(reg, x="Cuentas afectadas", y="Hallazgo", orientation="h", template=TPL, text="Cuentas afectadas", color_discrete_sequence=[NARANJA])
-        fig.update_layout(height=340, margin=dict(t=10, b=10), yaxis_title="", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        afect = d[[c for c, _, _ in flags if c in d.columns]].any(axis=1).sum()
-        st.metric("Cuentas con al menos una inconsistencia", f"{int(afect):,}", f"{(afect/len(d) if len(d) else 0):.0%} del filtro")
-        st.metric("MRR no explicado por retiros", f"${(d.loc[d['flag_estado_sin_retiro'],'mrr'].sum()):,.0f}")
-        if HAY_SOPORTE:
-            st.caption("Soporte: telefono usa NPS en escala 1 a 5 (no 0 a 10) y motivo_escala esta vacio salvo en escalamientos. Documentado, no afecta las tasas.")
-    st.dataframe(reg, hide_index=True, use_container_width=True)
+    tab = pd.DataFrame(inconsistencias, columns=["Archivo", "Inconsistencia", "Registros", "Veredicto", "Decision"])
+    st.dataframe(tab, hide_index=True, use_container_width=True,
+                 column_config={
+                     "Archivo": st.column_config.TextColumn(width="small"),
+                     "Inconsistencia": st.column_config.TextColumn(width="large"),
+                     "Registros": st.column_config.TextColumn(width="small"),
+                     "Veredicto": st.column_config.TextColumn(width="small"),
+                     "Decision": st.column_config.TextColumn(width="large"),
+                 })
+    st.caption("Veredicto: error de carga, contradiccion entre columnas, a validar con el negocio, campo opcional, "
+               "faltante o no es error. El criterio fue no borrar nada y dejar registrada la decision de cada hallazgo.")
