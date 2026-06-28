@@ -155,14 +155,13 @@ def cargar_base(path):
     df["churn_retiro"] = df["tipo_retiro"].notna()
     df["activado"] = df["facturas_emitidas_mes1"].fillna(0) > 0
     sino = lambda s: df[s].fillna("").str.lower().eq("si")
-    # Indice de activacion: 5 senales fuertes de configuracion temprana (True = falla)
+    # Indice de activacion: 4 hitos de onboarding temprano (True = falla)
     _falsa = pd.Series(False, index=df.index)
     _sig = [
         (~sino("configuracion_empresa_completa")) if "configuracion_empresa_completa" in df.columns else _falsa,
         (df["facturas_emitidas_mes1"].fillna(0).eq(0)) if "facturas_emitidas_mes1" in df.columns else _falsa,
         (~sino("plan_cuentas_configurado")) if "plan_cuentas_configurado" in df.columns else _falsa,
         (~sino("empleados_cargados")) if "empleados_cargados" in df.columns else _falsa,
-        (~sino("modulo_cxc_activo")) if "modulo_cxc_activo" in df.columns else _falsa,
     ]
     df["fallas_activacion"] = sum(s.astype(int) for s in _sig)
     df["flag_estado_sin_retiro"] = df["churn_estado"] & ~df["churn_retiro"]
@@ -339,8 +338,8 @@ with T["General"]:
     items = [
         f"La base activa es de <b>{n_act:,} cuentas</b> con un MRR de <b>${mrr_act:,.0f}</b>.",
         f"<b>{en_riesgo:,} de ellas ({pct_riesgo:.0%})</b> estan en arranque parcial o critico, es decir con dos o mas "
-        f"de los cinco pasos clave de arranque sin completar (configurar la empresa, emitir la primera factura, cargar "
-        f"el plan de cuentas, cargar empleados y activar cuentas por cobrar). Es el grupo con mas riesgo de churn.",
+        f"de los cuatro hitos de activacion sin completar (configurar la empresa, emitir la primera factura, cargar "
+        f"el plan de cuentas y cargar empleados). Es el grupo con mas riesgo de churn.",
     ]
     items += alertas if alertas else ["No se detectaron anomalias por pais, plan ni soporte en este corte."]
     cuerpo = "<ul style='margin:8px 0 0 0; padding-left:18px;'>" + "".join(f"<li style='margin-bottom:6px;'>{x}</li>" for x in items) + "</ul>"
@@ -425,8 +424,8 @@ with T["General"]:
 
     # ---- Hitos de activacion ----
     st.subheader("Hitos de activacion")
-    st.caption("Cuantos de los cinco hitos de activacion completo cada cuenta activa: configurar la empresa, emitir la "
-               "primera factura, cargar el plan de cuentas, cargar empleados y activar cuentas por cobrar.")
+    st.caption("Cuantos de los cuatro hitos de activacion completo cada cuenta activa: configurar la empresa, emitir la "
+               "primera factura, cargar el plan de cuentas y cargar empleados.")
     def _tier(n):
         return "Arranque completo" if n == 0 else "Buen arranque" if n == 1 else "Arranque parcial" if n == 2 else "Arranque critico"
     sa = act.copy()
@@ -444,10 +443,10 @@ with T["General"]:
     st.plotly_chart(fig, use_container_width=True)
     st.markdown(
         f"<div style='font-size:0.85rem; color:{NAVY}; line-height:1.7;'>"
-        f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 5 hitos. &nbsp;|&nbsp; "
-        f"<b style='color:#5FBDB3;'>Buen arranque</b>: 4 de 5, le falta 1. &nbsp;|&nbsp; "
-        f"<b style='color:{AMBAR};'>Arranque parcial</b>: 3 de 5, le faltan 2. &nbsp;|&nbsp; "
-        f"<b style='color:{CORAL};'>Arranque critico</b>: 2 o menos, le faltan 3 o mas."
+        f"<b style='color:{TEAL};'>Arranque completo</b>: completo los 4 hitos. &nbsp;|&nbsp; "
+        f"<b style='color:#5FBDB3;'>Buen arranque</b>: 3 de 4, le falta 1. &nbsp;|&nbsp; "
+        f"<b style='color:{AMBAR};'>Arranque parcial</b>: 2 de 4, le faltan 2. &nbsp;|&nbsp; "
+        f"<b style='color:{CORAL};'>Arranque critico</b>: 1 o ninguno, le faltan 3 o mas."
         f"</div>", unsafe_allow_html=True)
 
 
@@ -718,9 +717,9 @@ with T["Causa raiz"]:
     pct2 = (chd["fallas_activacion"] >= 2).mean() if len(chd) else 0
     diag = (f"<b>La causa raíz del churn es una activación incompleta de las características y funcionalidades de la app.</b> Las cuentas que no completan los primeros "
             f"pasos de configuración del producto (configurar la empresa, emitir la primera factura, cargar el plan de "
-            f"cuentas, cargar empleados y activar cuentas por cobrar) se van mucho más. Una cuenta que completa los cinco "
-            f"pasos tiene un churn cercano al {ch0:.0%}; una que no completa ninguno, cercano al {chmax:.0%}. De hecho, el "
-            f"<b>{pct2:.0%} del churn</b> son cuentas que dejaron dos o más de esos pasos sin completar. En cambio, las "
+            f"cuentas y cargar empleados) se van mucho más. Una cuenta que completa los cuatro "
+            f"hitos tiene un churn cercano al {ch0:.0%}; una que no completa ninguno, cercano al {chmax:.0%}. De hecho, el "
+            f"<b>{pct2:.0%} del churn</b> son cuentas que dejaron dos o más de esos hitos sin completar. En cambio, las "
             f"características del cliente como segmento, plan o país casi no influyen.")
     st.markdown(
         f"<div style='background:#f6fafa; border-left:4px solid {TEAL}; border-radius:8px; padding:12px 16px; margin-bottom:8px;'>"
@@ -790,8 +789,7 @@ with T["Causa raiz"]:
     st.markdown("##### 4. El bloque que sí explica el churn: la activación")
     senales5 = [("configuracion_empresa_completa", "Configuración de empresa"),
                 ("plan_cuentas_configurado", "Plan de cuentas"),
-                ("empleados_cargados", "Empleados cargados"),
-                ("modulo_cxc_activo", "Módulo CxC")]
+                ("empleados_cargados", "Empleados cargados")]
     filas = []
     for col, lbl in senales5:
         if col in d.columns:
@@ -821,7 +819,7 @@ with T["Causa raiz"]:
                        customdata=esc[["cuentas"]], hovertemplate="%{x} hitos sin completar<br>churn %{y:.0%}<br>%{customdata[0]} cuentas<extra></extra>")
     figE.update_layout(title="Probabilidad de churn según hitos de arranque sin completar",
                        height=380, yaxis_tickformat=".0%", coloraxis_showscale=False,
-                       yaxis_title="probabilidad de churn", xaxis_title="hitos sin completar (de 5)", margin=dict(t=44, b=10))
+                       yaxis_title="probabilidad de churn", xaxis_title="hitos sin completar (de 4)", margin=dict(t=44, b=10))
     st.plotly_chart(figE, use_container_width=True)
 
     # Composicion del churn por hitos sin completar
