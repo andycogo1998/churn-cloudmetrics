@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
+import requests
 
 st.set_page_config(page_title="Churn CloudMetrics", layout="wide", page_icon="📊")
 
@@ -18,6 +19,61 @@ GRIS = "#9AA7B0"        # neutro, inactivo
 # Alias para mantener compatibilidad con el resto del dashboard
 VERDE = TEAL; ROJO = CORAL; AZUL = TEAL_OSCURO; NARANJA = AMBAR
 ESCALA_CHURN = [TEAL, AMBAR, CORAL]
+
+
+# ---------------- IA (Gemini) ----------------
+# El mismo modelo que tu flujo de n8n. Si el nombre cambia, se ajusta aca.
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+
+
+def _gemini_key():
+    # La key se lee de los secrets de Streamlit, nunca del codigo.
+    try:
+        return st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        return ""
+
+
+SYS_IA = ("Sos analista de Customer Experience de CloudMetrics, un SaaS de contabilidad e invoicing en Latinoamerica. "
+          "Te paso metricas de churn ya calculadas. Escribi en espanol, claro y directo, en 4 a 6 frases, sin titulos, "
+          "sin vinetas y sin markdown. Explica que esta pasando y cerra con una accion concreta para el equipo de "
+          "Customer Success. No inventes numeros: usa solo los que te doy.")
+
+
+def analisis_ia(contexto):
+    key = _gemini_key()
+    if not key:
+        return None, "No hay GEMINI_API_KEY configurada."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={key}"
+    body = {"contents": [{"parts": [{"text": SYS_IA + "\n\nDatos del corte actual:\n" + contexto}]}],
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": 600}}
+    try:
+        r = requests.post(url, json=body, timeout=30)
+    except Exception as e:
+        return None, f"No se pudo conectar con Gemini: {e}"
+    if r.status_code != 200:
+        return None, f"Gemini respondio {r.status_code}. Revisa la API key o el nombre del modelo ({GEMINI_MODEL})."
+    try:
+        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip(), None
+    except Exception:
+        return None, "Gemini no devolvio texto (puede haber filtrado la respuesta)."
+
+
+def bloque_ia(slot, contexto, etiqueta="Generar analisis con IA"):
+    # Solo aparece si hay key configurada. A boton, para no gastar cuota en cada recarga.
+    if not _gemini_key():
+        return
+    if st.button(etiqueta, key=f"btn_{slot}"):
+        with st.spinner("Analizando con IA..."):
+            txt, err = analisis_ia(contexto)
+        st.session_state[f"ia_{slot}"] = txt if txt else f"No se pudo generar el analisis. {err}"
+    if st.session_state.get(f"ia_{slot}"):
+        st.markdown(
+            f"<div style='background:#fff; border:1px solid #e3e8ef; border-left:4px solid {TEAL_OSCURO}; "
+            f"border-radius:8px; padding:12px 16px; margin-top:6px;'>"
+            f"<div style='font-size:0.72rem; font-weight:700; color:{TEAL_OSCURO}; letter-spacing:.04em;'>ANALISIS GENERADO CON IA (GEMINI)</div>"
+            f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px; line-height:1.6;'>{st.session_state[f'ia_{slot}']}</div></div>",
+            unsafe_allow_html=True)
 
 # Template propio: fondo blanco y texto navy SIEMPRE, asi el dashboard se ve
 # igual en modo claro u oscuro (los graficos no heredan el tema del navegador).
@@ -347,6 +403,13 @@ with T["General"]:
         f"<div style='background:#f6fafa; border-left:4px solid {_bordes[nivel]}; border-radius:8px; padding:12px 16px; margin-bottom:6px;'>"
         f"<div style='font-size:0.78rem; font-weight:700; color:{_bordes[nivel]}; letter-spacing:.04em;'>DIAGNOSTICO DE LA BASE DE USUARIOS</div>"
         f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{cuerpo}</div></div>", unsafe_allow_html=True)
+
+    bloque_ia("general", (
+        f"Vista: base de usuarios. Base activa {n_act:,} cuentas, MRR mensual ${mrr_act:,.0f}. "
+        f"Cuentas activas en riesgo (2 o mas de 4 hitos de activacion sin completar): {en_riesgo:,} ({pct_riesgo:.0%}). "
+        f"Los 4 hitos de activacion son: configurar empresa, primera factura, plan de cuentas, empleados. "
+        f"Anomalias detectadas: {('; '.join(alertas)) if alertas else 'ninguna'}."
+    ))
 
     # ---- Tarjetas por estado, cada una con su MRR ----
     estados_cfg = [
@@ -760,6 +823,13 @@ with T["Causa raiz"]:
         f"<div style='background:#f6fafa; border-left:4px solid {TEAL}; border-radius:8px; padding:12px 16px; margin-bottom:8px;'>"
         f"<div style='font-size:0.78rem; font-weight:700; color:{TEAL}; letter-spacing:.04em;'>LA CAUSA RAÍZ DEL CHURN</div>"
         f"<div style='font-size:0.92rem; color:{NAVY}; margin-top:4px;'>{diag}</div></div>", unsafe_allow_html=True)
+
+    bloque_ia("causa", (
+        f"Vista: causa raiz del churn. La causa raiz es la activacion incompleta, medida con 4 hitos: configurar "
+        f"empresa, primera factura, plan de cuentas y empleados. Una cuenta que completa los 4 churnea {ch0:.0%}; "
+        f"una que no completa ninguno, {chmax:.0%}. El {pct2:.0%} del churn son cuentas que dejaron 2 o mas hitos sin "
+        f"completar. El perfil del cliente (segmento, plan, pais) casi no influye en el churn."
+    ))
 
     # --- 1. Uso del producto vs los retiros ---
     st.markdown("##### 1. Medir el uso del producto vs los retiros")
