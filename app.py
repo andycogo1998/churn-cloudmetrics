@@ -740,17 +740,17 @@ with T["Causa raiz"]:
     add("Primera factura no emitida", "Activación", num("facturas_emitidas_mes1").fillna(0).eq(0))
     add("Plan de cuentas sin configurar", "Activación", ~si("plan_cuentas_configurado"))
     add("Empleados no cargados", "Activación", ~si("empleados_cargados"))
-    add("Módulo CxC no activo", "Activación", ~si("modulo_cxc_activo"))
+    add("Módulo CxC no activo", "Modulos", ~si("modulo_cxc_activo"))
     add("Banco no conectado", "Activación", ~si("integracion_banco_conectada"))
     if "reportes_generados_mes3" in d.columns: add("Sin reportes en el mes 3", "Intensidad de uso", num("reportes_generados_mes3").eq(0))
     if "facturas_emitidas_mes3" in d.columns: add("Sin facturas en el mes 3", "Intensidad de uso", num("facturas_emitidas_mes3").eq(0))
     if "chat_reaperturas" in d.columns: add("Ticket de soporte reabierto", "Soporte", num("chat_reaperturas").fillna(0) > 0)
     if "chat_no_resueltos" in d.columns: add("Ticket sin resolver", "Soporte", num("chat_no_resueltos").fillna(0) > 0)
     if "tel_escalo" in d.columns: add("Llamada escalada", "Soporte", num("tel_escalo").fillna(0) > 0)
-    add("Módulo de nómina no activo", "Nicho", ~si("modulo_nomina_activo"))
-    add("Módulo de inventario no activo", "Nicho", ~si("modulo_inventario_activo"))
+    add("Módulo de nómina no activo", "Modulos", ~si("modulo_nomina_activo"))
+    add("Módulo de inventario no activo", "Modulos", ~si("modulo_inventario_activo"))
     sw = pd.DataFrame(sweep).dropna(subset=["churn"]).sort_values("churn")
-    cmap_cat = {"Síntoma": GRIS, "Activación": TEAL, "Intensidad de uso": NAVY, "Soporte": AMBAR, "Nicho": "#C8D0D8"}
+    cmap_cat = {"Síntoma": GRIS, "Activación": TEAL, "Intensidad de uso": NAVY, "Soporte": AMBAR, "Modulos": "#9B7EBD"}
     figW = px.bar(sw, x="churn", y="senal", color="categoria", orientation="h", template=TPL,
                   text=sw["churn"].map("{:.0%}".format), color_discrete_map=cmap_cat)
     figW.update_traces(textposition="outside", cliponaxis=False)
@@ -830,15 +830,43 @@ with T["Causa raiz"]:
                                 labels=["0 a 1 hito", "2 hitos", "3 o más hitos"])
         gcomp = chd2["bucket"].value_counts().reindex(["0 a 1 hito", "2 hitos", "3 o más hitos"]).reset_index()
         gcomp.columns = ["bucket", "cuentas"]
-        cc = st.columns([1, 2, 1])
-        with cc[1]:
+        dd = st.columns(2)
+        with dd[0]:
             figC = px.pie(gcomp, names="bucket", values="cuentas", template=TPL, hole=0.55,
                           color="bucket", color_discrete_map={"0 a 1 hito": TEAL, "2 hitos": AMBAR, "3 o más hitos": CORAL})
-            figC.update_traces(textinfo="label+percent", textfont=dict(color="white", size=13), sort=False)
-            figC.update_layout(title="Reparto del churn segun hitos sin completar", height=320, margin=dict(t=46, b=10), showlegend=False)
+            figC.update_traces(textinfo="label+percent", textfont=dict(color="white", size=12), sort=False)
+            figC.update_layout(title="Churn segun hitos sin completar", height=320, margin=dict(t=46, b=10), showlegend=False)
             st.plotly_chart(figC, use_container_width=True)
-        st.caption(f"El {pct2:.0%} del churn son cuentas que dejaron dos o más hitos de arranque sin completar. "
-                   "El abandono se concentra en las cuentas que arrancaron mal, no en las que arrancaron bien.")
+        with dd[1]:
+            if HAY_SOPORTE and "usa_soporte" in chd2.columns:
+                gs = chd2["usa_soporte"].map({True: "Contactó soporte", False: "No contactó"}).value_counts().reset_index()
+                gs.columns = ["grupo", "cuentas"]
+                figSc = px.pie(gs, names="grupo", values="cuentas", template=TPL, hole=0.55,
+                               color="grupo", color_discrete_map={"Contactó soporte": NAVY, "No contactó": GRIS})
+                figSc.update_traces(textinfo="label+percent", textfont=dict(color="white", size=12), sort=False)
+                figSc.update_layout(title="Churn segun contacto con soporte", height=320, margin=dict(t=46, b=10), showlegend=False)
+                st.plotly_chart(figSc, use_container_width=True)
+        st.caption(f"El {pct2:.0%} del churn dejó dos o más hitos sin completar. La mayoria del churn ademas paso por "
+                   "soporte, aunque eso refleja que el 80% de la base lo usa: el contacto por si solo no es la causa.")
+
+        # De los que contactaron soporte, churn por friccion
+        if HAY_SOPORTE and "friccion" in d.columns and "usa_soporte" in d.columns:
+            st.markdown("###### De los que contactaron soporte, ¿quiénes se fueron?")
+            sop = d[d["usa_soporte"]]
+            gf = pd.DataFrame({
+                "grupo": ["Con friccion", "Sin friccion"],
+                "churn": [sop[sop["friccion"]][col_churn].mean() if sop["friccion"].any() else 0,
+                          sop[~sop["friccion"]][col_churn].mean() if (~sop["friccion"]).any() else 0],
+            })
+            figF = px.bar(gf, x="grupo", y="churn", template=TPL, text=gf["churn"].map("{:.0%}".format),
+                          color="grupo", color_discrete_map={"Con friccion": CORAL, "Sin friccion": TEAL})
+            figF.update_traces(textposition="outside", cliponaxis=False)
+            figF.update_layout(height=320, yaxis_tickformat=".0%", showlegend=False, margin=dict(t=10, b=10),
+                               yaxis_title="tasa de churn", xaxis_title="")
+            st.plotly_chart(figF, use_container_width=True)
+            st.caption("Entre los que contactaron soporte, los que tuvieron friccion (un ticket reabierto, sin resolver, "
+                       "derivado o negativo) churnean mas que los que tuvieron buena experiencia. No es contactar soporte "
+                       "lo que pesa, sino que el soporte falle.")
 
 
 
