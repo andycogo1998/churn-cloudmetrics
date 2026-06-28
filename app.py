@@ -978,7 +978,7 @@ with T["Soporte"]:
 # ---------------- Calidad de datos ----------------
 with T["Calidad de datos"]:
     st.subheader("Panel de calidad de datos")
-    st.caption("Tres barridos: exploracion manual, revision con IA y analisis de distribucion. No se borra ninguna fila; "
+    st.caption("Tres barridos: exploracion manual, revision con IA. No se borra ninguna fila; "
                "cada inconsistencia se marca y se decide su uso. La tabla lista todas las que encontramos.")
 
     # Highlights de cobertura del dato
@@ -998,21 +998,21 @@ with T["Calidad de datos"]:
 
     inconsistencias = [
         ("01_usuarios", "fecha_ultimo_pago anterior a fecha_registro", "80", "Error de carga", "Mantener; marcar con flag y reportar a origen"),
-        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a cobranza"),
+        ("01_usuarios", "metodo_pago geograficamente imposible (PSE/OXXO)", "271", "A validar", "No segmentar por metodo_pago; escalar a collection"),
         ("01_usuarios", "nombre_empresa con duplicados", "940 (378 unicos)", "No es error", "Usar siempre user_id como clave, nunca el nombre"),
         ("01_usuarios", "Posibles cuentas duplicadas (mismo nombre, pais, plan y segmento)", "135", "A validar", "Aislar para revision de negocio; no deduplicar"),
-        ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Tratar como satisfaccion ordinal, no como NPS"),
+        ("02_retiros", "nps_salida en escala 1 a 6 y 52% nulo", "73", "A validar", "Escalar con el equipo responsable"),
         ("02_retiros", "motivo_secundario mayormente vacio", "97", "Campo opcional", "Usar solo cuando esta presente"),
         ("02_retiros", "comentario_libre parcialmente vacio", "51", "Campo opcional", "Usar solo los presentes para analisis de texto"),
         ("03_uso_producto", "primer_factura_emitida = no pero facturas_mes1 > 0", "203", "Contradiccion", "Usar facturas_mes1 > 0 como verdad de activacion"),
         ("03_uso_producto", "Facturo sin configuracion de empresa completa", "196", "A validar", "Marcar y escalar a producto; no asumir prerrequisito"),
         ("03_uso_producto", "login_30 en desacuerdo con sesiones_promedio_semana", "222 / 45", "No es contradiccion", "Miden ventanas distintas; usar cada una para su fin"),
-        ("03_uso_producto", "dias_primer_factura vacio", "305", "Coherente con el flag", "Usar solo donde primera factura = si"),
-        ("03_uso_producto", "Faltantes en facturas_mes3 y reportes_mes3", "77 / 226", "Faltante menor", "Usar con cautela"),
+        ("03_uso_producto", "dias_primer_factura vacio", "305", "A validar", "Usar solo donde primera factura = si"),
+        ("03_uso_producto", "Faltantes en facturas_mes3 y reportes_mes3", "77 / 226", "A validar", "Validar con el equipo de producto/data"),
         ("04a_soporte_chat", "tiempo_resolucion_hs cargado en tickets no resueltos", "393", "A validar", "Confirmar si mide resolucion o gestion del ticket"),
         ("04b_soporte_whatsapp", "resuelto_en_conversacion = si y deriva_a_agente = si", "106", "Contradiccion", "Indagar el flujo con el equipo"),
         ("04c_soporte_telefono", "nps_post_llamada nulo", "70", "Faltante", "Revisar la carga con el equipo"),
-        ("04c_soporte_telefono", "escalo_a_especialista = si pero motivo_escala vacio", "22", "Incompletitud", "No afecta el analisis; completar en origen"),
+        ("04c_soporte_telefono", "escalo_a_especialista = si pero motivo_escala vacio", "22", "A validar", "No afecta el analisis; completar en origen"),
     ]
     tab = pd.DataFrame(inconsistencias, columns=["Archivo", "Inconsistencia", "Registros", "Veredicto", "Decision"])
     st.dataframe(tab, hide_index=True, use_container_width=True,
