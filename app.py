@@ -838,16 +838,20 @@ with T["Causa raiz"]:
             figC.update_layout(title="Churn segun hitos sin completar", height=320, margin=dict(t=46, b=10), showlegend=False)
             st.plotly_chart(figC, use_container_width=True)
         with dd[1]:
-            if HAY_SOPORTE and "usa_soporte" in chd2.columns:
-                gs = chd2["usa_soporte"].map({True: "Contactó soporte", False: "No contactó"}).value_counts().reset_index()
+            if HAY_SOPORTE and "usa_soporte" in chd2.columns and "friccion" in chd2.columns:
+                chd2["_exp"] = np.where(~chd2["usa_soporte"], "No uso soporte",
+                                        np.where(chd2["friccion"], "Soporte con friccion", "Soporte sin friccion"))
+                orden_exp = ["Soporte con friccion", "Soporte sin friccion", "No uso soporte"]
+                gs = chd2["_exp"].value_counts().reindex(orden_exp).reset_index()
                 gs.columns = ["grupo", "cuentas"]
                 figSc = px.pie(gs, names="grupo", values="cuentas", template=TPL, hole=0.55,
-                               color="grupo", color_discrete_map={"Contactó soporte": NAVY, "No contactó": GRIS})
-                figSc.update_traces(textinfo="label+percent", textfont=dict(color="white", size=12), sort=False)
-                figSc.update_layout(title="Churn segun contacto con soporte", height=320, margin=dict(t=46, b=10), showlegend=False)
+                               color="grupo", color_discrete_map={"Soporte con friccion": CORAL, "Soporte sin friccion": TEAL, "No uso soporte": GRIS})
+                figSc.update_traces(textinfo="label+percent", textfont=dict(color="white", size=11), sort=False)
+                figSc.update_layout(title="Churn segun experiencia de soporte", height=320, margin=dict(t=46, b=10), showlegend=False)
                 st.plotly_chart(figSc, use_container_width=True)
-        st.caption(f"El {pct2:.0%} del churn dejó dos o más hitos sin completar. La mayoria del churn ademas paso por "
-                   "soporte, aunque eso refleja que el 80% de la base lo usa: el contacto por si solo no es la causa.")
+        st.caption(f"El {pct2:.0%} del churn dejó dos o más hitos sin completar. Mirando el soporte, solo una parte del churn "
+                   "tuvo una mala experiencia (friccion); el resto recibio buen soporte o ni lo uso, señal de que el contacto "
+                   "por si solo no es la causa, sino que el soporte falle.")
 
         # De los que contactaron soporte, churn por friccion
         if HAY_SOPORTE and "friccion" in d.columns and "usa_soporte" in d.columns:
